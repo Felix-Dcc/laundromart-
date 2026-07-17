@@ -1,153 +1,116 @@
 # Project Structure Overview
 
+LaundroMart is a monorepo with three applications sharing one API: a React
+Native mobile app (customers, riders, providers), a React web dashboard
+(admins / super admins), and a Node.js backend.
+
 ## 📁 Directory Organization
 
 ```
 laundry-management-system/
 │
-├── 📱 mobile/                    # React Native (Expo) Mobile App
+├── 📱 mobile/                     # React Native (Expo SDK 54) mobile app
 │   ├── src/
-│   │   ├── api/                  # API client configuration
-│   │   ├── components/           # Reusable UI components
-│   │   │   ├── AddressSelector.js
-│   │   │   ├── DatePicker.js
-│   │   │   ├── ETACard.js
-│   │   │   ├── GlassCard.js
-│   │   │   ├── GlassInput.js
-│   │   │   ├── NeonButton.js
-│   │   │   ├── PasswordStrength.js
-│   │   │   ├── StarRating.js
-│   │   │   └── StatusTimeline.js
-│   │   ├── context/              # React Context providers
-│   │   │   ├── AuthContext.js
-│   │   │   └── NotificationContext.js
-│   │   ├── navigation/           # Navigation configuration
-│   │   │   ├── AdminNavigator.js
-│   │   │   ├── AppNavigator.js
-│   │   │   ├── ProviderNavigator.js
-│   │   │   └── UserNavigator.js
-│   │   ├── screens/              # Screen components
-│   │   │   ├── admin/            # Admin screens
-│   │   │   ├── auth/             # Authentication screens
-│   │   │   ├── common/           # Shared screens
-│   │   │   ├── provider/         # Provider screens
-│   │   │   └── user/             # User screens
-│   │   ├── theme/                # Design system
-│   │   │   └── colors.js
-│   │   └── utils/                # Utility functions
-│   │       └── helpers.js
-│   ├── assets/                  # App icons & splash (placeholders — replace before release)
+│   │   ├── api/                  # Axios client (env-driven base URL)
+│   │   ├── components/           # Reusable UI (GlassCard, BrandLogo,
+│   │   │                         #   LiveRiderMap, StatusTimeline, …)
+│   │   ├── context/              # AuthContext, NotificationContext
+│   │   ├── navigation/           # App/User/Rider/Provider/Admin navigators
+│   │   ├── screens/              # auth/ user/ rider/ provider/ admin/ common/
+│   │   ├── services/             # realtime (Socket.IO client), location, …
+│   │   ├── theme/                # colors.js (incl. brand palette)
+│   │   └── utils/
+│   ├── assets/                   # Brand icons, splash, logos (generated —
+│   │                             #   see scripts/brand/generate_icons.py)
 │   ├── scripts/
-│   │   └── preflight.js         # Store-submission blocker check (npm run preflight)
+│   │   ├── preflight.js          # Store-submission checks (npm run preflight)
+│   │   └── brand/                # Icon/wordmark generator
 │   ├── App.js
-│   ├── app.config.js            # Expo config (reads env; guards production builds)
-│   ├── eas.json                 # EAS build/submit profiles
+│   ├── app.config.js             # Expo config — reads env, guards prod builds
+│   ├── eas.json                  # EAS build/submit profiles
 │   └── package.json
 │
-├── 🔧 backend/                    # Node.js/Express API Server
+├── 🔧 backend/                    # Node.js / Express REST API + Socket.IO
 │   ├── prisma/
-│   │   ├── migrations/           # Database migrations
-│   │   ├── schema.prisma         # Database schema
-│   │   └── seed.js               # Database seeding
+│   │   ├── migrations/           # Migration history
+│   │   ├── schema.prisma         # Database schema (PostgreSQL)
+│   │   └── seed.js               # Seed / demo data
 │   ├── src/
-│   │   ├── config/               # Configuration
-│   │   │   └── index.js
-│   │   ├── middleware/           # Middleware
-│   │   │   └── auth.js
-│   │   ├── routes/               # API routes
-│   │   │   ├── admin.js
-│   │   │   ├── analytics.js
-│   │   │   ├── auth.js
-│   │   │   ├── nearby.js
-│   │   │   ├── notifications.js
-│   │   │   ├── orders.js
-│   │   │   ├── pricing.js
-│   │   │   ├── provider.js
-│   │   │   ├── reviews.js
-│   │   │   └── user.js
-│   │   ├── services/             # Business logic
-│   │   │   ├── audit.js
-│   │   │   ├── eta.js
-│   │   │   ├── notification.js
-│   │   │   └── order.js
+│   │   ├── config/               # Env-driven config (fail-fast validation)
+│   │   ├── lib/                  # prisma, logger, redis (optional), orderShape
+│   │   ├── middleware/           # auth (JWT + roles)
+│   │   ├── routes/               # auth, orders, payments, rider, provider,
+│   │   │                         #   superadmin, support, analytics, …
+│   │   ├── services/             # orderStateMachine + orderService (single
+│   │   │                         #   source of truth for order status),
+│   │   │                         #   dispatch, payment, promo, realtime, …
 │   │   └── index.js              # Entry point
-│   ├── env.example
-│   └── package.json
+│   ├── Dockerfile                # Production image (non-root, healthcheck)
+│   ├── docker-entrypoint.sh      # Applies schema (prisma db push), starts API
+│   ├── railway.json              # Railway deploy config
+│   ├── ecosystem.config.js       # PM2 config (non-Docker deploys)
+│   └── env.example
 │
-├── 📦 archive/                    # Legacy/Reference Materials
-│   └── legacy-php-system/        # Original PHP system (deprecated)
+├── 🖥️ admin-web/                  # React (Vite) super-admin dashboard
+│   └── src/
+│       ├── pages/                # Dashboard, LiveOps, Orders, Users,
+│       │                         #   Providers, Riders, Payments, Analytics,
+│       │                         #   Promotions, Security, Support, …
+│       ├── components/           # Sidebar, Topbar, Layout, ui kit
+│       ├── context/              # Auth, Theme
+│       ├── api/  lib/            # API client, socket
+│       └── styles.css            # Design system (light/dark)
 │
+├── 🌐 nginx/                      # Reverse proxy (self-hosted Docker deploys)
+│   ├── conf.d/laundromat.conf    #   HTTP config + ACME webroot
+│   ├── conf.d/*.ssl.conf.example #   Production TLS template
+│   └── certs/                    #   TLS certs mounted here (never committed)
+│
+├── ⚙️ .github/workflows/ci.yml   # CI pipeline
+├── 📜 scripts/backup-db.sh       # Database backup helper
+├── 🐳 docker-compose.yml          # Postgres + Redis + API + nginx stack
+├── 📄 DEPLOYMENT.md               # Deployment guide (Docker, PM2, TLS)
 ├── 📄 README.md                   # Main project documentation
 ├── 📄 PROJECT_STRUCTURE.md        # This file
-└── 📄 .gitignore                 # Git ignore rules
-
+└── 📄 .gitignore
 ```
 
 ## 🗂️ Key Directories
 
 ### `/mobile`
-React Native mobile application built with Expo SDK 54.
-
-**Key Features:**
-- Premium glassmorphism UI design
-- Location-based services
-- Push notifications
-- Real-time order tracking
-- Ratings and reviews
+React Native app for the three field roles — customer, rider, provider — plus a
+lightweight admin view. Glassmorphism UI, live GPS rider tracking on Google
+Maps, push notifications, verified-weight pricing flow, Paystack payments.
+Built and shipped with EAS (`npm run build:production` runs preflight first).
 
 ### `/backend`
-Node.js/Express RESTful API server.
+Express API with Socket.IO real-time layer. PostgreSQL via Prisma. All order
+status changes flow through the state-machine service (`orderStateMachine.js`
++ `orderService.js`) — never write order status directly. JWT auth with
+rotating refresh tokens, RBAC (user / rider / provider / admin / superadmin),
+rate limiting, audit logging, TOTP 2FA for admins.
 
-**Key Features:**
-- PostgreSQL database with Prisma ORM
-- JWT authentication
-- Role-based access control
-- Push notification service
-- Audit logging
-- Analytics aggregation
+### `/admin-web`
+Vite + React dashboard for platform governance: KPIs, live operations map,
+order/user/provider/rider management, payments and refunds, promotions,
+broadcasts, support ticketing, audit logs, security controls.
 
-### `/archive`
-Contains legacy code and reference materials.
+## 📋 Conventions
 
-**Contents:**
-- `legacy-php-system/`: Original PHP-based system (deprecated, reference only)
+1. **Separation of concerns** — the three apps are independent; the API is the
+   only shared surface.
+2. **Single source of truth for order state** — the backend state machine owns
+   every transition; clients render, never decide.
+3. **Environment-driven config** — no secrets or hosts hardcoded; see
+   `backend/env.example` and `mobile/.env.example`.
+4. **CNG (no native folders)** — `mobile/android`/`ios` are generated at build
+   time from `app.config.js`; never commit them.
+5. **Brand from one definition** — every icon/logo is generated by
+   `mobile/scripts/brand/generate_icons.py`; colors mirror
+   `mobile/src/theme/colors.js` (`colors.brand`).
 
-## 📋 File Organization Principles
+## 🚀 Running & Deploying
 
-1. **Separation of Concerns**: Backend and mobile are separate projects
-2. **Feature-Based Structure**: Screens and routes organized by feature
-3. **Reusable Components**: Shared components in dedicated directory
-4. **Configuration Centralized**: Config files in dedicated folders
-5. **Legacy Preserved**: Old system archived for reference
-
-## 🧹 Cleanup Summary
-
-### Removed/Archived:
-- ✅ Legacy PHP system moved to `archive/legacy-php-system/`
-- ✅ Empty `mobile/assets/` directory (kept for future use)
-
-### Created:
-- ✅ Root `README.md` with comprehensive documentation
-- ✅ `.gitignore` for proper version control
-- ✅ Archive documentation
-
-### Maintained:
-- ✅ All active code in `backend/` and `mobile/`
-- ✅ Database migrations and schema
-- ✅ Configuration files
-- ✅ Node modules (excluded via .gitignore)
-
-## 🚀 Next Steps
-
-1. Review and customize `README.md` with your specific details
-2. Update `.env` files with your actual configuration
-3. Ensure all dependencies are installed (`npm install` in both directories)
-4. Run database migrations and seed data
-5. Start development servers
-
-## 📝 Notes
-
-- The legacy PHP system is preserved in `archive/` for reference only
-- All active development should be in `backend/` and `mobile/` directories
-- Follow the existing structure when adding new features
-- Keep components reusable and well-organized
+- Local development: `npm run backend` and `npm run mobile` from the repo root.
+- Store submission checks: `npm run preflight` in `mobile/`.
+- Deployment (Docker, Railway, PM2, TLS): see `DEPLOYMENT.md`.

@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx prisma *)",
+      "Bash(node prisma/seed.js)",
+      "Bash(node src/index.js)",
+      "Bash(curl -s http://localhost:3000/api/health)",
+      "Bash(npx expo *)",
+      "Bash(curl -s http://localhost:3000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@lms.com\",\"password\":\"password\"}')",
+      "Bash(curl -s http://localhost:3000/api/nearby/all -H \"Authorization: Bearer $\\(curl -s http://localhost:3000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@lms.com\",\"password\":\"password\"}')",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Total providers: {d[\\\\\"count\\\\\"]}'\\); [print\\(f'  - {p[\\\\\"businessName\\\\\"]} \\({p[\\\\\"address\\\\\"]}\\) @ {p[\\\\\"latitude\\\\\"]},{p[\\\\\"longitude\\\\\"]}'\\) for p in d['providers']]\")",
+      "Bash(ipconfig)",
+      "Bash(curl -s --connect-timeout 3 http://172.20.10.5:3000/api/health)",
+      "Bash(taskkill //F //IM \"node.exe\" //FI \"WINDOWTITLE eq *expo*\")",
+      "Bash(pkill -f \"expo start\")",
+      "PowerShell(Stop-Process -Id 16048 -Force -Confirm:$false)",
+      "PowerShell(Stop-Process -Id 16764 -Force -Confirm:$false)",
+      "Bash(curl -s \"http://localhost:8081/src/components/TimePicker.js.bundle?platform=android&dev=true\" -o /dev/null -w \"TimePicker bundle HTTP: %{http_code}\\\\n\")",
+      "Bash(curl -s \"http://localhost:8081/node_modules/expo/AppEntry.bundle?platform=android&dev=true&minify=false\" -o /tmp/app_bundle.txt -w \"HTTP:%{http_code} size:%{size_download}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s \"http://localhost:8081/status\" -o /dev/null)",
+      "Bash(curl -s \"http://localhost:8081/node_modules/expo/AppEntry.bundle?platform=android&dev=true&minify=false\" -o /tmp/app_bundle2.txt -w \"HTTP:%{http_code} size:%{size_download}\\\\n\")",
+      "Bash(curl -s http://localhost:3000/api/health -o /dev/null)",
+      "Bash(curl -s \"http://localhost:8081/node_modules/expo/AppEntry.bundle?platform=android&dev=true&minify=false\" -o /tmp/bundle3.txt -w \"HTTP:%{http_code} size:%{size_download}\\\\n\")",
+      "Bash(echo \"=== context of matches ===\"; grep -o '.\\\\{40\\\\}SyntaxError:.\\\\{40\\\\}\\\\|.\\\\{20\\\\}\"type\":\"TransformError\".\\\\{60\\\\}' /tmp/bundle3.txt | head *)",
+      "Bash(curl -s \"http://localhost:8081/node_modules/expo/AppEntry.bundle?platform=android&dev=true&minify=false\" -o /tmp/bundle4.txt -w \"HTTP:%{http_code} size:%{size_download}\\\\n\")",
+      "Bash(curl -s http://localhost:3000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"mapuser@test.com\",\"password\":\"password\"}')",
+      "Bash(curl -s \"http://localhost:8081/node_modules/expo/AppEntry.bundle?platform=android&dev=true&minify=false\" -o /tmp/bundle5.txt -w \"HTTP:%{http_code} size:%{size_download}\\\\n\")",
+      "Bash(curl -s http://localhost:3000/api/health && echo \" <- backend OK\" *)",
+      "Bash(curl -s \"http://localhost:8081/node_modules/expo/AppEntry.bundle?platform=android&dev=true&minify=false\" -o /tmp/bundle6.txt -w \"HTTP:%{http_code} size:%{size_download}\\\\n\")"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+# Keep `railway up` uploads small — the Dockerfile installs its own deps.
+node_modules
+*.log
+.env
+.env.*
+!.env.production.example
+
+# One-off local maintenance scripts (also excluded from the Docker image)
+fix-enum*.js
+check-db-state.js
+add-assigned-rider-column.js
+update-pickup-status.js

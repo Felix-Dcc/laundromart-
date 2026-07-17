@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: laundry_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/laundry_test?schema=public
+      NODE_ENV: production
+      # 64-char throwaway secret so the prod fail-fast passes in CI.
+      JWT_SECRET: ci_only_secret_0123456789abcdef0123456789abcdef0123456789
+      CORS_ORIGINS: https://example.com
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Validate Prisma schema
+        run: npx prisma validate
+      - name: Generate client + sync schema
+        run: npx prisma generate && npx prisma db push --skip-generate
+      - name: Boot smoke test (prod config + DB-aware health check)
+        run: |
+          node src/index.js & SERVER_PID=$!
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:3000/api/health | grep -q '"db":"up"'; then
+              echo "Health check passed."; kill $SERVER_PID; exit 0
+            fi
+            sleep 1
+          done
+          echo "Health check failed."; kill $SERVER_PID 2>/dev/null; exit 1
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      # Validates dependency tree + Expo config. (Add `expo export` here once
+      # you want CI to build the JS bundle.)
+      - run: npx expo config --type public > /dev/null
+
+  # ── Deploy (fill in for your host/registry). Example: build & push image. ──
+  # deploy:
+  #   needs: [backend, mobile]
+  #   if: github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Build & push image
+  #       run: |
+  #         echo "${{ secrets.REGISTRY_TOKEN }}" | docker login -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+  #         docker build -t your-registry/laundromat-api:${{ github.sha }} ./backend
+  #         docker push your-registry/laundromat-api:${{ github.sha }}
+  #     - name: Deploy over SSH
+  #       run: ssh user@server "cd /opt/laundromat && docker compose pull && docker compose up -d"

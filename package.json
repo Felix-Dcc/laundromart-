@@ -1,0 +1,16 @@
+{
+  "name": "laundry-management-system",
+  "version": "1.0.0",
+  "description": "Laundry Management System - mobile (Expo) + backend",
+  "private": true,
+  "scripts": {
+    "start": "cd mobile && npx expo start",
+    "mobile": "cd mobile && npx expo start",
+    "backend": "npm run dev --prefix backend",
+    "android": "cd mobile && npx expo start --android",
+    "ios": "cd mobile && npx expo start --ios"
+  },
+  "devDependencies": {
+    "expo": "~54.0.0"
+  }
+}

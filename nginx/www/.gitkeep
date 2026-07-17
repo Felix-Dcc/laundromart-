@@ -1,0 +1,1 @@
+# Certbot ACME challenge webroot. Kept so the docker bind-mount resolves.

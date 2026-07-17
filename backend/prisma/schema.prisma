@@ -1,0 +1,538 @@
+// Prisma Schema for Laundry Management System
+// Mirrors the existing PHP/MySQL database structure
+// with added Provider role for mobile-first platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserType {
+  user
+  provider
+  admin
+  rider
+  superadmin
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+// ============================================================
+// SINGLE AUTHORITATIVE ORDER LIFECYCLE
+// One enum, one field. Replaces the old status / pickupStatus /
+// serviceStatus trio. Transitions are enforced by services/orderService.js.
+// ============================================================
+enum OrderStatus {
+  created                // 1.  Order Created
+  awaiting_rider         // 2.  Awaiting Rider
+  rider_assigned         // 3.  Rider Assigned (pickup)
+  rider_on_the_way       // 4.  Rider On The Way (to pickup)
+  rider_arrived          // 5.  Rider Arrived At Pickup
+  picked_up              // 6.  Laundry Picked Up
+  at_laundromat          // 7.  Laundry Delivered To Laundromat
+  weight_verified        // 7b. Weight Verified (awaiting payment)
+  preparing              // 8.  Preparing To Wash
+  washing                // 9.  Washing
+  drying                 // 10. Drying (optional)
+  ironing                // 11. Ironing (optional)
+  ready_for_delivery       // 12. Ready For Pickup (by delivery rider)
+  delivery_rider_assigned  // 13. Rider Assigned For Delivery
+  rider_to_laundromat      // 14. Rider On The Way To Laundromat
+  collected_from_laundromat// 15. Laundry Collected From Laundromat
+  out_for_delivery         // 16. Rider On The Way To Customer
+  rider_arrived_at_customer// 17. Rider Arrived At Customer
+  delivered                // 18. Delivered To Customer
+  completed                // 19. Order Completed
+  cancelled              // optional
+  failed                 // optional
+  refunded               // optional
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  refunded
+}
+
+enum PricingStatus {
+  active
+  inactive
+}
+
+enum NotificationType {
+  info
+  success
+  warning
+  error
+}
+
+enum RiderStatus {
+  online
+  offline
+  busy
+}
+
+model User {
+  id                Int        @id @default(autoincrement())
+  firstName         String     @map("first_name") @db.VarChar(50)
+  lastName          String     @map("last_name") @db.VarChar(50)
+  email             String     @unique @db.VarChar(100)
+  phone             String     @db.VarChar(15)
+  address           String     @db.Text
+  password          String     @db.VarChar(255)
+  userType          UserType   @default(user) @map("user_type")
+  status            UserStatus @default(active)
+  latitude          Float?
+  longitude         Float?
+  businessName      String?    @map("business_name") @db.VarChar(150)
+  businessHours     String?    @map("business_hours") @db.VarChar(100)
+  acceptingOrders   Boolean    @default(true) @map("accepting_orders") // provider toggle: pause new orders
+  providerApproved  Boolean    @default(true) @map("provider_approved") // admin approval gate (provider)
+  isVerified        Boolean    @default(false) @map("is_verified")      // admin-set "verified" badge (provider)
+  riderApproved     Boolean    @default(true) @map("rider_approved")    // admin approval gate (rider)
+  twofaSecret       String?    @map("twofa_secret") @db.VarChar(64)     // TOTP secret (admins)
+  twofaEnabled      Boolean    @default(false) @map("twofa_enabled")
+  emailVerified     Boolean    @default(false) @map("email_verified")
+  verificationToken String?    @map("verification_token") @db.VarChar(255)
+  resetToken        String?    @map("reset_token") @db.VarChar(255)
+  resetTokenExpires DateTime?  @map("reset_token_expires")
+  fcmToken          String?    @map("fcm_token") @db.VarChar(500)
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  avgRating   Float @default(0) @map("avg_rating")
+  reviewCount Int   @default(0) @map("review_count")
+
+  // Rider-specific fields
+  riderStatus        RiderStatus? @map("rider_status")
+  lastLocationUpdate DateTime?    @map("last_location_update")
+  totalPickups       Int          @default(0) @map("total_pickups")
+  totalEarnings      Decimal      @default(0.00) @map("total_earnings") @db.Decimal(10, 2)
+
+  // Relations
+  laundryRequests  LaundryRequest[]       @relation("OrderUser")
+  assignedOrders   LaundryRequest[]       @relation("AssignedRider")
+  deliveryOrders   LaundryRequest[]       @relation("DeliveryRider")
+  providerOrders   LaundryRequest[]       @relation("OrderProvider")
+  statusChanges    RequestStatusHistory[] @relation("ChangedBy")
+  notifications    Notification[]
+  receivedReviews  Review[]               @relation("ReviewProvider")
+  writtenReviews   Review[]               @relation("ReviewAuthor")
+  auditLogs        AuditLog[]             @relation("AuditLogs")
+  riderAssignments RiderAssignment[]
+  favorites        Favorite[]             @relation("UserFavorites")
+  favoritedBy      Favorite[]             @relation("ProviderFavoritedBy")
+  transactions     Transaction[]
+  refreshTokens    RefreshToken[]
+  deviceTokens     DeviceToken[]
+  deliveryDeclines DeliveryDecline[]
+  supportTickets   SupportTicket[]        @relation("TicketUser")
+  ticketMessages   TicketMessage[]        @relation("TicketSender")
+  notificationPreference NotificationPreference?
+
+  @@index([email])
+  @@index([userType])
+  @@map("users")
+}
+
+model LaundryPricing {
+  id          Int           @id @default(autoincrement())
+  serviceType String        @map("service_type") @db.VarChar(100)
+  pricePerKg  Decimal       @map("price_per_kg") @db.Decimal(10, 2)
+  description String?       @db.Text
+  status      PricingStatus @default(active)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  @@map("laundry_pricing")
+}
+
+model LaundryRequest {
+  id                  Int            @id @default(autoincrement())
+  userId              Int            @map("user_id")
+  requestNumber       String         @unique @map("request_number") @db.VarChar(20)
+  pickupDate          DateTime       @map("pickup_date") @db.Date
+  pickupTime          String         @map("pickup_time") @db.VarChar(10)
+  deliveryDate        DateTime?      @map("delivery_date") @db.Date
+  deliveryTime        String?        @map("delivery_time") @db.VarChar(10)
+  pickupAddress       String         @map("pickup_address") @db.Text
+  deliveryAddress     String         @map("delivery_address") @db.Text
+  laundryType         String         @map("laundry_type") @db.VarChar(100)
+  weightKg            Decimal        @map("weight_kg") @db.Decimal(5, 2)         // estimated weight (quote)
+  actualWeightKg      Decimal?       @map("actual_weight_kg") @db.Decimal(5, 2)  // provider-verified weight
+  weightVerifiedAt    DateTime?      @map("weight_verified_at")
+  specialInstructions String?        @map("special_instructions") @db.Text
+  totalAmount         Decimal        @default(0.00) @map("total_amount") @db.Decimal(10, 2)   // estimated total (quote)
+  finalAmount         Decimal?       @map("final_amount") @db.Decimal(10, 2)                  // final total after verification
+  status              OrderStatus    @default(created)
+  paymentStatus       PaymentStatus  @default(pending) @map("payment_status")
+  paymentMethod       String?        @map("payment_method") @db.VarChar(50)
+  promoCode           String?        @map("promo_code") @db.VarChar(40)
+  promoDiscount       Decimal        @default(0.00) @map("promo_discount") @db.Decimal(10, 2)
+  adminNotes          String?        @map("admin_notes") @db.Text
+  estimatedCompletion DateTime?      @map("estimated_completion")
+  etaMinutes          Int?           @map("eta_minutes")
+  assignedRiderId     Int?           @map("assigned_rider_id")   // pickup-leg rider
+  deliveryRiderId     Int?           @map("delivery_rider_id")   // return-leg rider
+  providerId          Int?           @map("provider_id")
+  pickupLatitude      Float?         @map("pickup_latitude")
+  pickupLongitude     Float?         @map("pickup_longitude")
+  laundromatLatitude  Float?         @map("laundromat_latitude")
+  laundromatLongitude Float?         @map("laundromat_longitude")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  user            User                   @relation("OrderUser", fields: [userId], references: [id], onDelete: Cascade)
+  assignedRider   User?                  @relation("AssignedRider", fields: [assignedRiderId], references: [id], onDelete: SetNull)
+  deliveryRider   User?                  @relation("DeliveryRider", fields: [deliveryRiderId], references: [id], onDelete: SetNull)
+  provider        User?                  @relation("OrderProvider", fields: [providerId], references: [id], onDelete: SetNull)
+  statusHistory   RequestStatusHistory[]
+  review          Review?
+  riderAssignment RiderAssignment?
+  transactions    Transaction[]
+  deliveryDeclines DeliveryDecline[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([assignedRiderId])
+  @@index([deliveryRiderId])
+  @@index([providerId])
+  @@index([createdAt])
+  @@map("laundry_requests")
+}
+
+model RequestStatusHistory {
+  id        Int      @id @default(autoincrement())
+  requestId Int      @map("request_id")
+  status    String   @db.VarChar(50)
+  notes     String?  @db.Text
+  changedBy Int      @map("changed_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  request LaundryRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user    User           @relation("ChangedBy", fields: [changedBy], references: [id], onDelete: Cascade)
+
+  @@map("request_status_history")
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int              @map("user_id")
+  title     String           @db.VarChar(255)
+  message   String           @db.Text
+  type      NotificationType @default(info)
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model Review {
+  id         Int      @id @default(autoincrement())
+  orderId    Int      @unique @map("order_id")
+  userId     Int      @map("user_id") // customer who wrote it
+  providerId Int      @map("provider_id") // laundromat being reviewed
+  rating     Int // 1–5
+  comment    String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  order    LaundryRequest @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user     User           @relation("ReviewAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  provider User           @relation("ReviewProvider", fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@index([userId])
+  @@map("reviews")
+}
+
+model SystemSetting {
+  id           Int      @id @default(autoincrement())
+  settingKey   String   @unique @map("setting_key") @db.VarChar(100)
+  settingValue String   @map("setting_value") @db.Text
+  description  String?  @db.Text
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+enum AuditActionType {
+  ORDER_CREATED
+  ORDER_STATUS_CHANGED
+  ORDER_CANCELLED
+  ORDER_DELETED
+  USER_CREATED
+  USER_UPDATED
+  USER_DELETED
+  USER_STATUS_CHANGED
+  PRICING_UPDATED
+  SETTING_UPDATED
+  REVIEW_SUBMITTED
+  REVIEW_DELETED
+  PAYMENT_PROCESSED
+  REFUND_ISSUED
+}
+
+model AuditLog {
+  id          Int             @id @default(autoincrement())
+  userId      Int             @map("user_id")
+  actionType  AuditActionType @map("action_type")
+  entityType  String          @map("entity_type") @db.VarChar(50) // 'order', 'user', 'pricing', etc.
+  entityId    Int?            @map("entity_id")
+  description String          @db.Text
+  metadata    String?         @db.Text // JSON string for additional context
+  ipAddress   String?         @map("ip_address") @db.VarChar(45)
+  userAgent   String?         @map("user_agent") @db.Text
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation("AuditLogs", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([actionType])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+enum PaymentProvider {
+  paystack
+  stripe
+}
+
+enum PaymentChannel {
+  mtn
+  vodafone
+  airteltigo
+  card
+}
+
+enum TransactionStatus {
+  pending
+  paid
+  failed
+  refunded
+}
+
+model Transaction {
+  id               Int               @id @default(autoincrement())
+  reference        String            @unique // our public reference (also sent to gateway)
+  orderId          Int               @map("order_id")
+  userId           Int               @map("user_id")
+  provider         PaymentProvider   @default(paystack)
+  method           String            @db.VarChar(10) // 'momo' | 'card'
+  channel          PaymentChannel?
+  amount           Decimal           @db.Decimal(10, 2)
+  currency         String            @default("GHS") @db.VarChar(10)
+  status           TransactionStatus @default(pending)
+  idempotencyKey   String?           @unique @map("idempotency_key") @db.VarChar(100)
+  gatewayReference String?           @map("gateway_reference") @db.VarChar(120)
+  authorizationUrl String?           @map("authorization_url") @db.Text
+  paidAt           DateTime?         @map("paid_at")
+  refundedAt       DateTime?         @map("refunded_at")
+  failureReason    String?           @map("failure_reason") @db.Text
+  metadata         String?           @db.Text // JSON raw gateway payload (audit trail)
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  order LaundryRequest @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+model DeviceToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  token     String   @unique @db.VarChar(255) // Expo push token (routes via FCM/APNs)
+  platform  String?  @db.VarChar(20)          // 'ios' | 'android'
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+model NotificationPreference {
+  id              Int      @id @default(autoincrement())
+  userId          Int      @unique @map("user_id")
+  orderUpdates    Boolean  @default(true) @map("order_updates")
+  promotions      Boolean  @default(true)
+  messages        Boolean  @default(true)
+  providerUpdates Boolean  @default(true) @map("provider_updates")
+  system          Boolean  @default(true)
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+enum PromoType {
+  percent
+  fixed
+}
+
+enum TicketStatus {
+  open
+  pending
+  resolved
+  closed
+}
+
+model SupportTicket {
+  id        Int          @id @default(autoincrement())
+  userId    Int          @map("user_id")
+  subject   String       @db.VarChar(150)
+  status    TicketStatus @default(open)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  user     User            @relation("TicketUser", fields: [userId], references: [id], onDelete: Cascade)
+  messages TicketMessage[]
+
+  @@index([status])
+  @@index([userId])
+  @@map("support_tickets")
+}
+
+model TicketMessage {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int      @map("ticket_id")
+  senderId  Int      @map("sender_id")
+  body      String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User          @relation("TicketSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ticket_messages")
+}
+
+model Promotion {
+  id          Int       @id @default(autoincrement())
+  code        String    @unique @db.VarChar(40)
+  description String?   @db.Text
+  type        PromoType @default(percent)
+  value       Decimal   @db.Decimal(10, 2) // percent (0–100) or fixed amount
+  minOrder    Decimal   @default(0.00) @map("min_order") @db.Decimal(10, 2)
+  maxUses     Int?      @map("max_uses") // null = unlimited
+  usedCount   Int       @default(0) @map("used_count")
+  startsAt    DateTime? @map("starts_at")
+  expiresAt   DateTime? @map("expires_at")
+  active      Boolean   @default(true)
+  createdBy   Int       @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([active])
+  @@map("promotions")
+}
+
+model LoginAttempt {
+  id        Int      @id @default(autoincrement())
+  email     String   @db.VarChar(100)
+  userId    Int?     @map("user_id")
+  success   Boolean
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  userAgent String?  @map("user_agent") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([email])
+  @@index([success])
+  @@index([createdAt])
+  @@map("login_attempts")
+}
+
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64) // sha256 of the opaque token
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Favorite {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  providerId Int      @map("provider_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user     User @relation("UserFavorites", fields: [userId], references: [id], onDelete: Cascade)
+  provider User @relation("ProviderFavoritedBy", fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, providerId]) // prevent duplicate favorites
+  @@index([userId])
+  @@index([providerId])
+  @@map("favorites")
+}
+
+// A delivery rider declining an available delivery — so it disappears from
+// THEIR pool but remains available to every other nearby rider (auto-requeue).
+model DeliveryDecline {
+  id        Int      @id @default(autoincrement())
+  orderId   Int      @map("order_id")
+  riderId   Int      @map("rider_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  order LaundryRequest @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  rider User           @relation(fields: [riderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, riderId])
+  @@index([riderId])
+  @@map("delivery_declines")
+}
+
+model RiderAssignment {
+  id            Int       @id @default(autoincrement())
+  orderId       Int       @unique @map("order_id")
+  riderId       Int       @map("rider_id")
+  assignedAt    DateTime  @default(now()) @map("assigned_at")
+  acceptedAt    DateTime? @map("accepted_at")
+  rejectedAt    DateTime? @map("rejected_at")
+  expiresAt     DateTime? @map("expires_at")
+  pickedUpAt    DateTime? @map("picked_up_at")
+  deliveredAt   DateTime? @map("delivered_at")
+  riderEarnings Decimal   @default(0.00) @map("rider_earnings") @db.Decimal(10, 2)
+  distanceKm    Float?    @map("distance_km")
+  notes         String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  order LaundryRequest @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  rider User           @relation(fields: [riderId], references: [id], onDelete: Cascade)
+
+  @@index([riderId])
+  @@index([assignedAt])
+  @@map("rider_assignments")
+}

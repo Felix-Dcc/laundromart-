@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+!.env.production.example
+*.log
+.git
+.gitignore
+prisma/dev.db
+fix-enum*.js
+check-db-state.js
+add-assigned-rider-column.js
+update-pickup-status.js

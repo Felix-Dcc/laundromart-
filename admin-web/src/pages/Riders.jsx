@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, money, Loading, Empty, initials, fmtDateTime } from '../components/ui';
+import { Badge, money, Modal, Loading, Empty, initials, fmtDateTime } from '../components/ui';
 import { sa } from '../api/client';
 
 const RIDER = { online: '#10b981', busy: '#f59e0b', offline: '#6b7280' };
@@ -10,6 +10,7 @@ const RIDER = { online: '#10b981', busy: '#f59e0b', offline: '#6b7280' };
 export default function Riders() {
   const [rows, setRows] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [create, setCreate] = useState(false);
 
   async function load() { setRows(null); const r = await sa.riders(); setRows(r.data.riders); }
   useEffect(() => { load(); }, []);
@@ -24,7 +25,8 @@ export default function Riders() {
   return (
     <>
       <PageHead title="Riders" sub={`Delivery fleet · ${online} online`}
-        actions={<Link className="btn" to="/live-ops"><Icon name="map" size={15} /> Live Map</Link>} />
+        actions={<><Link className="btn" to="/live-ops"><Icon name="map" size={15} /> Live Map</Link>
+          <button className="btn primary" onClick={() => setCreate(true)}><Icon name="rider" size={15} /> Add Rider</button></>} />
 
       <div className="card">
         {rows == null ? <Loading /> : rows.length === 0 ? <Empty title="No riders" /> : (
@@ -55,6 +57,32 @@ export default function Riders() {
           </div>
         )}
       </div>
+
+      {create && <CreateRider onClose={() => setCreate(false)} onDone={() => { setCreate(false); load(); }} />}
     </>
+  );
+}
+
+function CreateRider({ onClose, onDone }) {
+  const [f, setF] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '' });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  async function save() {
+    setBusy(true);
+    try { await sa.createRider(f); onDone(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+  }
+  return (
+    <Modal title="Add Rider" onClose={onClose} actions={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Create</button></>}>
+      <div className="grid" style={{ gap: 12 }}>
+        <div className="row" style={{ gap: 10 }}>
+          <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>First name</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.firstName} onChange={set('firstName')} /></div>
+          <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>Last name</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.lastName} onChange={set('lastName')} /></div>
+        </div>
+        <div><label className="muted" style={{ fontSize: 12.5 }}>Email</label><input className="input" style={{ width: '100%', marginTop: 4 }} type="email" value={f.email} onChange={set('email')} /></div>
+        <div><label className="muted" style={{ fontSize: 12.5 }}>Phone</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.phone} onChange={set('phone')} /></div>
+        <div><label className="muted" style={{ fontSize: 12.5 }}>Temporary password</label><input className="input" style={{ width: '100%', marginTop: 4 }} type="text" value={f.password} onChange={set('password')} placeholder="min 6 chars" /></div>
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}><Icon name="check" size={12} /> The rider is created approved and can sign in immediately, then go online from the rider app.</div>
+      </div>
+    </Modal>
   );
 }

@@ -250,6 +250,45 @@ router.get('/riders', async (req, res) => {
   }
 });
 
+// Create a rider directly from the dashboard (admin-onboarded → pre-approved).
+router.post('/riders', async (req, res) => {
+  try {
+    const { firstName, lastName, email, phone, password } = req.body;
+    if (!firstName || !lastName || !email || !password) {
+      return res.status(400).json({ error: 'First name, last name, email and password are required.' });
+    }
+    if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    const cleanEmail = String(email).trim().toLowerCase();
+    const exists = await prisma.user.findUnique({ where: { email: cleanEmail } });
+    if (exists) return res.status(400).json({ error: 'Email is already registered.' });
+
+    const created = await prisma.user.create({
+      data: {
+        firstName: String(firstName).trim(),
+        lastName: String(lastName).trim(),
+        email: cleanEmail,
+        phone: (phone ? String(phone) : '0000000000').trim(),
+        address: 'Rider',
+        password: await bcrypt.hash(String(password), 10),
+        userType: 'rider',
+        status: 'active',
+        riderApproved: true,    // onboarded by an admin → approved to work
+        riderStatus: 'offline', // rider goes online from the app
+        emailVerified: true,
+      },
+    });
+    await logAuditEvent({
+      userId: req.user.id, actionType: 'USER_CREATED', entityType: 'user', entityId: created.id,
+      description: `${req.user.firstName} created rider ${created.firstName} ${created.lastName} (${created.email})`,
+      ipAddress: req.ip, userAgent: req.get?.('user-agent'),
+    });
+    res.status(201).json({ message: 'Rider created.', rider: { id: created.id, email: created.email } });
+  } catch (error) {
+    console.error('Create rider error:', error);
+    res.status(500).json({ error: 'Failed to create rider.' });
+  }
+});
+
 router.patch('/riders/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);

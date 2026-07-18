@@ -2,6 +2,7 @@ import axios from 'axios';
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
+
 export const api = axios.create({ baseURL: API_URL, timeout: 20000 });
 
 api.interceptors.request.use((cfg) => {
@@ -35,6 +36,7 @@ export const sa = {
   providers: (search) => api.get('/superadmin/providers', { params: { search } }),
   patchProvider: (id, body) => api.patch(`/superadmin/providers/${id}`, body),
   riders: () => api.get('/superadmin/riders'),
+  createRider: (body) => api.post('/superadmin/riders', body),
   patchRider: (id, body) => api.patch(`/superadmin/riders/${id}`, body),
   patchUser: (id, body) => api.patch(`/superadmin/users/${id}`, body),
   deleteUser: (id) => api.delete(`/superadmin/users/${id}`),

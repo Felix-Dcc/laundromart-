@@ -27,6 +27,7 @@ export default function RiderDashboardScreen({ navigation }) {
   const [availableDeliveries, setAvailableDeliveries] = useState([]);
   const [activeDelivery, setActiveDelivery] = useState(null);
   const [limitReached, setLimitReached] = useState(false);
+  const [pickupRadiusKm, setPickupRadiusKm] = useState(null);
   const lastRiderStatusRef = useRef(riderStatus);
 
   const loadDataRef = useRef(null);
@@ -56,6 +57,7 @@ export default function RiderDashboardScreen({ navigation }) {
           const ordersResponse = await riderAPI.getAvailableOrders();
           setAvailableOrders(ordersResponse.data.orders || []);
           setLimitReached(!!ordersResponse.data.limitReached);
+          setPickupRadiusKm(ordersResponse.data.maxPickupRadiusKm ?? null);
         } catch (error) {
           console.error('Load available orders error:', error);
           setAvailableOrders([]);
@@ -273,6 +275,21 @@ export default function RiderDashboardScreen({ navigation }) {
         </TouchableOpacity>
       )}
 
+      {/* Offline state — explain why the screen is empty and how to fix it */}
+      {!isOnline && (
+        <View style={styles.section}>
+          <EmptyState
+            icon="power-outline"
+            title="You're offline"
+            subtitle="Go online to start receiving nearby pickup and delivery requests."
+            actionLabel="Go Online"
+            onAction={handleToggleStatus}
+            tint="#10b981"
+            style={{ paddingVertical: 40 }}
+          />
+        </View>
+      )}
+
       {/* Available Delivery Requests */}
       {isOnline && availableDeliveries.length > 0 && (
         <View style={styles.section}>
@@ -355,7 +372,9 @@ export default function RiderDashboardScreen({ navigation }) {
             <EmptyState
               icon="notifications-outline"
               title="No available orders"
-              subtitle="New orders will appear here when customers place them."
+              subtitle={pickupRadiusKm
+                ? `New orders within ${pickupRadiusKm} km will appear here as customers place them.`
+                : 'New orders will appear here when customers place them.'}
               tint="#6b7280"
               style={{ paddingVertical: 32 }}
             />

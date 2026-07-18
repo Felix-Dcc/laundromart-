@@ -50,8 +50,10 @@ async function main() {
       email: 'myrider@lms.com', phone: '0203334455',
       address: 'Cape Coast',
       userType: 'rider',
+      // Cape Coast, near the demo laundromats — starts ONLINE so newly placed
+      // orders are immediately visible on the rider dashboard after a reseed.
       latitude: 5.1100, longitude: -1.2820,
-      riderStatus: 'offline',
+      riderStatus: 'online',
     },
     {
       firstName: 'Demo', lastName: 'Admin',

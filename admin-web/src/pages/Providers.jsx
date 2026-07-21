@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, money, Modal, Loading, Empty, initials } from '../components/ui';
+import { Badge, money, Modal, SkeletonTable, Empty, initials } from '../components/ui';
 import { sa } from '../api/client';
+import { useToast } from '../components/Toast';
 
 export default function Providers() {
+  const { toast } = useToast();
   const [rows, setRows] = useState(null);
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState(null);
@@ -15,7 +17,7 @@ export default function Providers() {
 
   async function patch(id, body) {
     setBusyId(id);
-    try { await sa.patchProvider(id, body); await load(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusyId(null); }
+    try { await sa.patchProvider(id, body); toast.success('Provider updated'); await load(); } catch (e) { toast.error(e.response?.data?.error || 'Update failed'); } finally { setBusyId(null); }
   }
 
   const pendingCount = (rows || []).filter((p) => !p.approved).length;
@@ -32,8 +34,9 @@ export default function Providers() {
         <button className="btn" onClick={load}><Icon name="refresh" size={15} /> Refresh</button>
       </div>
 
+      {rows == null ? <SkeletonTable cols={7} /> : (
       <div className="card">
-        {rows == null ? <Loading /> : rows.length === 0 ? <Empty title="No providers" /> : (
+        {rows.length === 0 ? <Empty title="No providers" /> : (
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr><th>Laundromat</th><th>Rating</th><th>Orders</th><th>Earnings</th><th>Status</th><th>Approval</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
@@ -72,6 +75,7 @@ export default function Providers() {
           </div>
         )}
       </div>
+      )}
 
       {create && <CreateProvider onClose={() => setCreate(false)} onDone={() => { setCreate(false); load(); }} />}
     </>
@@ -79,12 +83,13 @@ export default function Providers() {
 }
 
 function CreateProvider({ onClose, onDone }) {
+  const { toast } = useToast();
   const [f, setF] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', businessName: '', businessHours: '7:00 AM – 9:00 PM', latitude: '', longitude: '' });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   async function save() {
     setBusy(true);
-    try { await sa.createProvider(f); onDone(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+    try { await sa.createProvider(f); toast.success('Provider created'); onDone(); } catch (e) { toast.error(e.response?.data?.error || 'Failed to create provider'); } finally { setBusy(false); }
   }
   return (
     <Modal title="Add Provider" onClose={onClose} actions={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Create</button></>}>

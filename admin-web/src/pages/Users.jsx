@@ -2,12 +2,14 @@ import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, Modal, fmtDate, Loading, Empty, initials } from '../components/ui';
+import { Badge, Modal, fmtDate, SkeletonTable, Empty, initials } from '../components/ui';
 import { adminApi, sa } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/Toast';
 
 export default function Users() {
   const { isSuper } = useAuth();
+  const { toast, confirm } = useToast();
   const [params] = useSearchParams();
   const [rows, setRows] = useState(null);
   const [page, setPage] = useState(1);
@@ -24,15 +26,15 @@ export default function Users() {
   useEffect(() => { load(1); }, []); // eslint-disable-line
 
   async function toggle(u) {
-    try { await adminApi.toggleUser(u.id); load(page); } catch (e) { alert(e.response?.data?.error || 'Failed'); }
+    try { await adminApi.toggleUser(u.id); toast.success(u.status === 'active' ? 'User suspended' : 'User activated'); load(page); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
   }
   async function del(u) {
-    if (!window.confirm(`Delete ${u.email}? This cannot be undone.`)) return;
-    try { await sa.deleteUser(u.id); load(page); } catch (e) { alert(e.response?.data?.error || 'Failed'); }
+    if (!(await confirm({ title: 'Delete user', message: `Delete ${u.email}? This cannot be undone.`, danger: true, confirmLabel: 'Delete' }))) return;
+    try { await sa.deleteUser(u.id); toast.success('User deleted'); load(page); } catch (e) { toast.error(e.response?.data?.error || 'Delete failed'); }
   }
   async function reset(u) {
-    if (!window.confirm(`Reset password for ${u.email}?`)) return;
-    try { const r = await sa.resetPassword(u.id); setTempPw({ email: u.email, pw: r.data.temporaryPassword }); } catch (e) { alert(e.response?.data?.error || 'Failed'); }
+    if (!(await confirm({ title: 'Reset password', message: `Generate a new temporary password for ${u.email}?` }))) return;
+    try { const r = await sa.resetPassword(u.id); setTempPw({ email: u.email, pw: r.data.temporaryPassword }); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
   }
 
   return (
@@ -46,8 +48,9 @@ export default function Users() {
         <button className="btn" onClick={() => load(page)}><Icon name="refresh" size={15} /> Refresh</button>
       </div>
 
+      {rows == null ? <SkeletonTable cols={7} /> : (
       <div className="card">
-        {rows == null ? <Loading /> : rows.length === 0 ? <Empty title="No users found" /> : (
+        {rows.length === 0 ? <Empty title="No users found" /> : (
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr><th>User</th><th>Email</th><th>Phone</th><th>Orders</th><th>Status</th><th>Joined</th><th></th></tr></thead>
@@ -81,6 +84,7 @@ export default function Users() {
           </div>
         )}
       </div>
+      )}
 
       {edit && <EditUser user={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(page); }} />}
       {tempPw && (
@@ -94,12 +98,13 @@ export default function Users() {
 }
 
 function EditUser({ user, onClose, onSaved }) {
+  const { toast } = useToast();
   const [f, setF] = useState({ firstName: user.firstName, lastName: user.lastName, phone: user.phone, address: user.address || '' });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   async function save() {
     setBusy(true);
-    try { await sa.patchUser(user.id, f); onSaved(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+    try { await sa.patchUser(user.id, f); toast.success('User updated'); onSaved(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
   }
   return (
     <Modal title="Edit User" onClose={onClose} actions={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Save</button></>}>

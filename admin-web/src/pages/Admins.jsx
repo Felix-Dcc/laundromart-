@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, Modal, Loading, Empty, initials, fmtDate } from '../components/ui';
+import { Badge, Modal, SkeletonTable, Empty, initials, fmtDate } from '../components/ui';
 import { sa } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/Toast';
 
 export default function Admins() {
   const { isSuper, user } = useAuth();
+  const { toast, confirm } = useToast();
   const [rows, setRows] = useState(null);
   const [create, setCreate] = useState(false);
 
@@ -14,12 +16,12 @@ export default function Admins() {
   useEffect(() => { load(); }, []);
 
   async function patch(a, body, confirmMsg) {
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
-    try { await sa.patchAdmin(a.id, body); load(); } catch (e) { alert(e.response?.data?.error || 'Failed'); }
+    if (confirmMsg && !(await confirm({ title: 'Change role', message: confirmMsg }))) return;
+    try { await sa.patchAdmin(a.id, body); toast.success('Admin updated'); load(); } catch (e) { toast.error(e.response?.data?.error || 'Update failed'); }
   }
   async function del(a) {
-    if (!window.confirm(`Delete admin ${a.email}?`)) return;
-    try { await sa.deleteAdmin(a.id); load(); } catch (e) { alert(e.response?.data?.error || 'Failed'); }
+    if (!(await confirm({ title: 'Delete admin', message: `Delete ${a.email}? This cannot be undone.`, danger: true, confirmLabel: 'Delete' }))) return;
+    try { await sa.deleteAdmin(a.id); toast.success('Admin deleted'); load(); } catch (e) { toast.error(e.response?.data?.error || 'Delete failed'); }
   }
 
   return (
@@ -29,8 +31,9 @@ export default function Admins() {
 
       {!isSuper && <div className="card card-pad" style={{ marginBottom: 14, color: 'var(--text-2)', fontSize: 13 }}><Icon name="shield" size={14} /> Only super admins can create or modify administrators.</div>}
 
+      {rows == null ? <SkeletonTable cols={6} /> : (
       <div className="card">
-        {rows == null ? <Loading /> : rows.length === 0 ? <Empty title="No admins" /> : (
+        {rows.length === 0 ? <Empty title="No admins" /> : (
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr><th>Admin</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
@@ -58,6 +61,7 @@ export default function Admins() {
           </div>
         )}
       </div>
+      )}
 
       {create && <CreateAdmin onClose={() => setCreate(false)} onDone={() => { setCreate(false); load(); }} />}
     </>
@@ -65,12 +69,13 @@ export default function Admins() {
 }
 
 function CreateAdmin({ onClose, onDone }) {
+  const { toast } = useToast();
   const [f, setF] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', role: 'admin' });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   async function save() {
     setBusy(true);
-    try { await sa.createAdmin(f); onDone(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+    try { await sa.createAdmin(f); toast.success('Admin created'); onDone(); } catch (e) { toast.error(e.response?.data?.error || 'Failed to create admin'); } finally { setBusy(false); }
   }
   return (
     <Modal title="Add Admin" onClose={onClose} actions={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Create</button></>}>

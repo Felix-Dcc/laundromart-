@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, money, Modal, Loading, Empty, initials, fmtDateTime } from '../components/ui';
+import { Badge, money, Modal, SkeletonTable, Empty, initials, fmtDateTime } from '../components/ui';
 import { sa } from '../api/client';
+import { useToast } from '../components/Toast';
 
 const RIDER = { online: '#10b981', busy: '#f59e0b', offline: '#6b7280' };
 
 export default function Riders() {
+  const { toast } = useToast();
   const [rows, setRows] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [create, setCreate] = useState(false);
@@ -17,7 +19,7 @@ export default function Riders() {
 
   async function patch(id, body) {
     setBusyId(id);
-    try { await sa.patchRider(id, body); await load(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusyId(null); }
+    try { await sa.patchRider(id, body); toast.success('Rider updated'); await load(); } catch (e) { toast.error(e.response?.data?.error || 'Update failed'); } finally { setBusyId(null); }
   }
 
   const online = (rows || []).filter((r) => r.riderStatus === 'online' || r.riderStatus === 'busy').length;
@@ -28,8 +30,9 @@ export default function Riders() {
         actions={<><Link className="btn" to="/live-ops"><Icon name="map" size={15} /> Live Map</Link>
           <button className="btn primary" onClick={() => setCreate(true)}><Icon name="rider" size={15} /> Add Rider</button></>} />
 
+      {rows == null ? <SkeletonTable cols={7} /> : (
       <div className="card">
-        {rows == null ? <Loading /> : rows.length === 0 ? <Empty title="No riders" /> : (
+        {rows.length === 0 ? <Empty title="No riders" /> : (
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr><th>Rider</th><th>Status</th><th>Pickups</th><th>Earnings</th><th>Last Seen</th><th>Approval</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
@@ -57,6 +60,7 @@ export default function Riders() {
           </div>
         )}
       </div>
+      )}
 
       {create && <CreateRider onClose={() => setCreate(false)} onDone={() => { setCreate(false); load(); }} />}
     </>
@@ -64,12 +68,13 @@ export default function Riders() {
 }
 
 function CreateRider({ onClose, onDone }) {
+  const { toast } = useToast();
   const [f, setF] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '' });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   async function save() {
     setBusy(true);
-    try { await sa.createRider(f); onDone(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+    try { await sa.createRider(f); toast.success('Rider created'); onDone(); } catch (e) { toast.error(e.response?.data?.error || 'Failed to create rider'); } finally { setBusy(false); }
   }
   return (
     <Modal title="Add Rider" onClose={onClose} actions={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Create</button></>}>

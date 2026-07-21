@@ -1,4 +1,30 @@
+import { useEffect, useRef } from 'react';
 import Icon from './Icon';
+
+// Trap focus inside an overlay and close it on Escape. Shared by Modal/Drawer
+// so every dialog is keyboard-accessible without repeating the plumbing.
+function useDialogA11y(onClose) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const node = ref.current;
+    const prev = document.activeElement;
+    const focusables = () => node?.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    (focusables()?.[0] || node)?.focus();
+    const onKey = (e) => {
+      if (e.key === 'Escape') { onClose?.(); return; }
+      if (e.key === 'Tab' && node) {
+        const els = [...focusables()].filter((el) => !el.disabled);
+        if (!els.length) return;
+        const first = els[0], last = els[els.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); prev?.focus?.(); };
+  }, [onClose]);
+  return ref;
+}
 
 export const money = (n) => `GHS ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 export const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
@@ -82,12 +108,13 @@ export function Empty({ title = 'Nothing here', sub }) {
 }
 
 export function Drawer({ title, onClose, children, actions }) {
+  const ref = useDialogA11y(onClose);
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="drawer" onClick={(e) => e.stopPropagation()}>
+      <div className="drawer" ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <div className="drawer-head">
           <div style={{ fontWeight: 800, fontSize: 16 }}>{title}</div>
-          <button className="icon-btn" onClick={onClose}><Icon name="x" /></button>
+          <button className="icon-btn" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
         </div>
         <div style={{ padding: 20 }}>{children}</div>
         {actions && <div style={{ padding: 16, borderTop: '1px solid var(--border)', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>{actions}</div>}
@@ -97,16 +124,51 @@ export function Drawer({ title, onClose, children, actions }) {
 }
 
 export function Modal({ title, onClose, children, actions }) {
+  const ref = useDialogA11y(onClose);
   return (
     <div className="overlay" style={{ justifyContent: 'center', alignItems: 'center' }} onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div style={{ fontWeight: 800 }}>{title}</div>
-          <button className="icon-btn" onClick={onClose}><Icon name="x" size={16} /></button>
+          <button className="icon-btn" aria-label="Close" onClick={onClose}><Icon name="x" size={16} /></button>
         </div>
         <div style={{ padding: 20 }}>{children}</div>
         {actions && <div style={{ padding: 16, borderTop: '1px solid var(--border)', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>{actions}</div>}
       </div>
+    </div>
+  );
+}
+
+// ── Skeleton loaders — shaped placeholders that reduce layout shift. ──
+export function Skeleton({ w = '100%', h = 14, r = 8, style }) {
+  return <span className="skel" style={{ display: 'block', width: w, height: h, borderRadius: r, ...style }} />;
+}
+
+export function SkeletonTable({ rows = 6, cols = 5 }) {
+  return (
+    <div className="card" aria-busy="true" aria-label="Loading">
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 16 }}>
+        {Array.from({ length: cols }).map((_, i) => <Skeleton key={i} w={`${100 / cols}%`} h={11} />)}
+      </div>
+      {Array.from({ length: rows }).map((_, r) => (
+        <div key={r} style={{ padding: '15px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 16, alignItems: 'center' }}>
+          {Array.from({ length: cols }).map((_, c) => <Skeleton key={c} w={c === 0 ? '60%' : `${70 / cols}%`} h={13} />)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function SkeletonKpis({ count = 8 }) {
+  return (
+    <div className="kpi-grid" aria-busy="true" aria-label="Loading metrics">
+      {Array.from({ length: count }).map((_, i) => (
+        <div className="kpi" key={i}>
+          <Skeleton w={40} h={40} r={11} />
+          <Skeleton w="70%" h={11} style={{ marginTop: 12 }} />
+          <Skeleton w="45%" h={22} style={{ marginTop: 8 }} />
+        </div>
+      ))}
     </div>
   );
 }

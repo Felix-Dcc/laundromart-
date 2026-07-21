@@ -24,7 +24,7 @@ export default function Topbar({ onToggleSidebar, onToggleMobile }) {
   return (
     <header className="topbar">
       <button className="collapse-btn desktop-only" onClick={onToggleSidebar} title="Collapse sidebar"><Icon name="menu" size={18} /></button>
-      <button className="collapse-btn mobile-only" onClick={onToggleMobile} title="Menu" style={{ display: 'none' }}><Icon name="menu" size={18} /></button>
+      <button className="collapse-btn mobile-only" onClick={onToggleMobile} title="Menu"><Icon name="menu" size={18} /></button>
 
       <form className="search" onSubmit={submitSearch}>
         <Icon name="search" size={16} color="var(--text-3)" />

@@ -41,6 +41,7 @@ export default function Layout() {
   return (
     <div className="shell">
       <Sidebar collapsed={collapsed} mobileOpen={mobileOpen} pending={pending} />
+      <div className={`sidebar-backdrop ${mobileOpen ? 'show' : ''}`} onClick={() => setMobileOpen(false)} />
       <div className="main">
         <Topbar onToggleSidebar={() => setCollapsed((c) => !c)} onToggleMobile={() => setMobileOpen((m) => !m)} />
         <div className="content">

@@ -193,6 +193,58 @@ router.get('/providers', async (req, res) => {
   }
 });
 
+// Create a laundromat directly from the dashboard (admin-onboarded →
+// approved, verified and open, so it's immediately bookable by customers).
+router.post('/providers', async (req, res) => {
+  try {
+    const { firstName, lastName, email, phone, password, businessName, businessHours, latitude, longitude } = req.body;
+    if (!firstName || !lastName || !email || !password || !businessName) {
+      return res.status(400).json({ error: 'First name, last name, email, password and business name are required.' });
+    }
+    if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    const cleanEmail = String(email).trim().toLowerCase();
+    const exists = await prisma.user.findUnique({ where: { email: cleanEmail } });
+    if (exists) return res.status(400).json({ error: 'Email is already registered.' });
+
+    // A parseable "H:MM AM – H:MM PM" range keeps the open/closed gate working.
+    const hours = (businessHours && String(businessHours).trim()) || '7:00 AM – 9:00 PM';
+    const lat = latitude != null && latitude !== '' ? parseFloat(latitude) : null;
+    const lng = longitude != null && longitude !== '' ? parseFloat(longitude) : null;
+
+    const created = await prisma.user.create({
+      data: {
+        firstName: String(firstName).trim(),
+        lastName: String(lastName).trim(),
+        email: cleanEmail,
+        phone: (phone ? String(phone) : '0000000000').trim(),
+        address: String(businessName).trim(),
+        password: await bcrypt.hash(String(password), 10),
+        userType: 'provider',
+        businessName: String(businessName).trim(),
+        businessHours: hours,
+        latitude: lat,
+        longitude: lng,
+        status: 'active',
+        acceptingOrders: true,   // open for orders
+        providerApproved: true,  // admin-onboarded → approved
+        isVerified: true,        // and verified
+        emailVerified: true,
+      },
+    });
+    const { cacheDel, KEYS } = require('../lib/cache');
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    await logAuditEvent({
+      userId: req.user.id, actionType: 'USER_CREATED', entityType: 'user', entityId: created.id,
+      description: `${req.user.firstName} created laundromat "${created.businessName}" (${created.email})`,
+      ipAddress: req.ip, userAgent: req.get?.('user-agent'),
+    });
+    res.status(201).json({ message: 'Provider created.', provider: { id: created.id, email: created.email, hasLocation: lat != null && lng != null } });
+  } catch (error) {
+    console.error('Create provider error:', error);
+    res.status(500).json({ error: 'Failed to create provider.' });
+  }
+});
+
 router.patch('/providers/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);

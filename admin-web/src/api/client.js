@@ -34,6 +34,7 @@ export const sa = {
   liveOps: () => api.get('/superadmin/live-ops'),
   systemHealth: () => api.get('/superadmin/system-health'),
   providers: (search) => api.get('/superadmin/providers', { params: { search } }),
+  createProvider: (body) => api.post('/superadmin/providers', body),
   patchProvider: (id, body) => api.patch(`/superadmin/providers/${id}`, body),
   riders: () => api.get('/superadmin/riders'),
   createRider: (body) => api.post('/superadmin/riders', body),

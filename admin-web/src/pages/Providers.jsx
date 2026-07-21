@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, money, Loading, Empty, initials } from '../components/ui';
+import { Badge, money, Modal, Loading, Empty, initials } from '../components/ui';
 import { sa } from '../api/client';
 
 export default function Providers() {
   const [rows, setRows] = useState(null);
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState(null);
+  const [create, setCreate] = useState(false);
 
   async function load() { setRows(null); const r = await sa.providers(search || undefined); setRows(r.data.providers); }
   useEffect(() => { load(); }, []); // eslint-disable-line
@@ -21,7 +22,8 @@ export default function Providers() {
 
   return (
     <>
-      <PageHead title="Providers" sub={`Laundromats${pendingCount ? ` · ${pendingCount} pending approval` : ''}`} />
+      <PageHead title="Providers" sub={`Laundromats${pendingCount ? ` · ${pendingCount} pending approval` : ''}`}
+        actions={<button className="btn primary" onClick={() => setCreate(true)}><Icon name="provider" size={15} /> Add Provider</button>} />
       <div className="toolbar">
         <form className="search" style={{ maxWidth: 320 }} onSubmit={(e) => { e.preventDefault(); load(); }}>
           <Icon name="search" size={15} color="var(--text-3)" />
@@ -70,6 +72,38 @@ export default function Providers() {
           </div>
         )}
       </div>
+
+      {create && <CreateProvider onClose={() => setCreate(false)} onDone={() => { setCreate(false); load(); }} />}
     </>
+  );
+}
+
+function CreateProvider({ onClose, onDone }) {
+  const [f, setF] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', businessName: '', businessHours: '7:00 AM – 9:00 PM', latitude: '', longitude: '' });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  async function save() {
+    setBusy(true);
+    try { await sa.createProvider(f); onDone(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+  }
+  return (
+    <Modal title="Add Provider" onClose={onClose} actions={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Create</button></>}>
+      <div className="grid" style={{ gap: 12 }}>
+        <div><label className="muted" style={{ fontSize: 12.5 }}>Business name</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.businessName} onChange={set('businessName')} placeholder="e.g. Cape Clean Laundry" /></div>
+        <div className="row" style={{ gap: 10 }}>
+          <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>Owner first name</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.firstName} onChange={set('firstName')} /></div>
+          <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>Owner last name</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.lastName} onChange={set('lastName')} /></div>
+        </div>
+        <div><label className="muted" style={{ fontSize: 12.5 }}>Email</label><input className="input" style={{ width: '100%', marginTop: 4 }} type="email" value={f.email} onChange={set('email')} /></div>
+        <div><label className="muted" style={{ fontSize: 12.5 }}>Phone</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.phone} onChange={set('phone')} /></div>
+        <div><label className="muted" style={{ fontSize: 12.5 }}>Temporary password</label><input className="input" style={{ width: '100%', marginTop: 4 }} type="text" value={f.password} onChange={set('password')} placeholder="min 6 chars" /></div>
+        <div><label className="muted" style={{ fontSize: 12.5 }}>Business hours</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.businessHours} onChange={set('businessHours')} placeholder="7:00 AM – 9:00 PM" /></div>
+        <div className="row" style={{ gap: 10 }}>
+          <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>Latitude</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.latitude} onChange={set('latitude')} placeholder="5.1121" /></div>
+          <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>Longitude</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.longitude} onChange={set('longitude')} placeholder="-1.2860" /></div>
+        </div>
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}><Icon name="check" size={12} /> Created approved, verified and open. Add latitude &amp; longitude so it appears in customer search — without them the laundromat won't be discoverable.</div>
+      </div>
+    </Modal>
   );
 }

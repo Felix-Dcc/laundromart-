@@ -710,7 +710,7 @@ router.put('/settings', async (req, res) => {
 // ============================================================
 router.get('/analytics', async (req, res) => {
   try {
-    const [byStatus, services, provs, totalOrders, cancelled, revenue, repeat] = await Promise.all([
+    const [byStatus, services, provs, totalOrders, cancelled, revenue, repeat, payMethods, topRiders, acqRows] = await Promise.all([
       prisma.laundryRequest.groupBy({ by: ['status'], _count: { _all: true } }),
       prisma.laundryRequest.groupBy({ by: ['laundryType'], _count: { _all: true }, _sum: { totalAmount: true } }),
       prisma.laundryRequest.groupBy({ by: ['providerId'], where: { providerId: { not: null } }, _count: { _all: true }, orderBy: { _count: { providerId: 'desc' } }, take: 8 }),
@@ -718,16 +718,28 @@ router.get('/analytics', async (req, res) => {
       prisma.laundryRequest.count({ where: { status: 'cancelled' } }),
       prisma.transaction.aggregate({ where: { status: 'paid' }, _sum: { amount: true }, _count: true }),
       prisma.$queryRaw`SELECT COUNT(*)::int AS c FROM (SELECT user_id FROM laundry_requests GROUP BY user_id HAVING COUNT(*) >= 2) t`,
+      // Payment-method split (paid transactions).
+      prisma.transaction.groupBy({ by: ['method'], where: { status: 'paid' }, _count: { _all: true }, _sum: { amount: true } }).catch(() => []),
+      // Rider leaderboard.
+      prisma.user.findMany({ where: { userType: 'rider' }, select: { firstName: true, lastName: true, totalPickups: true, totalEarnings: true }, orderBy: { totalPickups: 'desc' }, take: 8 }),
+      // Customer acquisition — new customers per week, last 12 weeks.
+      prisma.$queryRaw`SELECT to_char(date_trunc('week', created_at), 'YYYY-MM-DD') AS wk, COUNT(*)::int AS v
+                       FROM users WHERE user_type = 'user' AND created_at >= NOW() - INTERVAL '12 weeks'
+                       GROUP BY wk ORDER BY wk`.catch(() => []),
     ]);
 
     const provIds = provs.map((p) => p.providerId);
-    const provNames = provIds.length ? await prisma.user.findMany({ where: { id: { in: provIds } }, select: { id: true, businessName: true, firstName: true } }) : [];
-    const nameOf = Object.fromEntries(provNames.map((p) => [p.id, p.businessName || `${p.firstName}'s Laundry`]));
+    const provRows = provIds.length ? await prisma.user.findMany({ where: { id: { in: provIds } }, select: { id: true, businessName: true, firstName: true, avgRating: true } }) : [];
+    const provOf = Object.fromEntries(provRows.map((p) => [p.id, p]));
+    const nameOf = (id) => provOf[id]?.businessName || `${provOf[id]?.firstName || '#' + id}'s Laundry`;
 
     res.json({
       ordersByStatus: byStatus.map((s) => ({ status: s.status, count: s._count._all })).sort((a, b) => b.count - a.count),
       popularServices: services.map((s) => ({ service: s.laundryType, orders: s._count._all, revenue: num(s._sum.totalAmount) })).sort((a, b) => b.orders - a.orders),
-      popularLaundromats: provs.map((p) => ({ name: nameOf[p.providerId] || `#${p.providerId}`, orders: p._count._all })),
+      popularLaundromats: provs.map((p) => ({ name: nameOf(p.providerId), orders: p._count._all, rating: num(provOf[p.providerId]?.avgRating) })),
+      paymentMethods: payMethods.map((m) => ({ method: (m.method || 'unknown').toUpperCase(), count: m._count._all, revenue: num(m._sum.amount) })),
+      riderPerformance: topRiders.map((r) => ({ name: `${r.firstName} ${r.lastName}`, pickups: r.totalPickups || 0, earnings: num(r.totalEarnings) })),
+      acquisition: acqRows.map((r) => ({ week: r.wk.slice(5), customers: Number(r.v) })),
       cancellationRate: totalOrders ? Math.round((cancelled / totalOrders) * 1000) / 10 : 0,
       repeatCustomers: repeat[0]?.c || 0,
       totalOrders,

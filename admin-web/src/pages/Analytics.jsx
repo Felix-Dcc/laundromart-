@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Kpi, money, Loading, exportCsv } from '../components/ui';
+import { Kpi, money, SkeletonKpis, Skeleton, exportCsv } from '../components/ui';
 import { STATUS } from '../components/ui';
 import { sa } from '../api/client';
 
 const AXIS = { fontSize: 11, fill: 'var(--text-3)' };
 const tip = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12, color: 'var(--text)' };
 const PIE = ['#4f46e5', '#10b981', '#f59e0b', '#0ea5e9', '#8b5cf6', '#ef4444', '#6366f1', '#059669'];
+const PAY = { MOMO: '#10b981', CARD: '#4f46e5', UNKNOWN: '#94a3b8' };
 
 export default function Analytics() {
   const [a, setA] = useState(null);
   useEffect(() => { sa.analytics().then((r) => setA(r.data)); }, []);
-  if (!a) return <Loading label="Crunching numbers…" />;
+  if (!a) return (<><PageHead title="Analytics" sub="Platform performance & trends" /><SkeletonKpis count={6} /><div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', marginTop: 18 }}>{[0, 1, 2, 3].map((i) => <Skeleton key={i} h={300} r={14} />)}</div></>);
 
   const statusData = a.ordersByStatus.map((s) => ({ name: (STATUS[s.status]?.[0] || s.status), value: s.count }));
 
@@ -72,6 +73,48 @@ export default function Analytics() {
         </div>
 
         <div className="card card-pad">
+          <div className="card-title" style={{ marginBottom: 10 }}>Payment Methods</div>
+          <div style={{ height: 260 }}>
+            {(a.paymentMethods?.length) ? (
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={a.paymentMethods} dataKey="count" nameKey="method" cx="50%" cy="50%" outerRadius={90} innerRadius={50} paddingAngle={2}>
+                    {a.paymentMethods.map((m) => <Cell key={m.method} fill={PAY[m.method] || '#6366f1'} />)}
+                  </Pie>
+                  <Tooltip contentStyle={tip} formatter={(v, n, p) => [`${v} txns · ${money(p.payload.revenue)}`, p.payload.method]} /><Legend wrapperStyle={{ fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart label="No payments yet" />}
+          </div>
+        </div>
+
+        <div className="card card-pad">
+          <div className="card-title" style={{ marginBottom: 10 }}>Rider Performance</div>
+          <div style={{ height: 260 }}><ResponsiveContainer>
+            <BarChart data={a.riderPerformance || []} layout="vertical" margin={{ left: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+              <XAxis type="number" tick={AXIS} allowDecimals={false} /><YAxis type="category" dataKey="name" tick={{ ...AXIS, fontSize: 11 }} width={110} />
+              <Tooltip contentStyle={tip} cursor={{ fill: 'var(--surface-2)' }} formatter={(v, n, p) => [`${v} pickups · ${money(p.payload.earnings)}`, 'Rider']} />
+              <Bar dataKey="pickups" fill="#0ea5e9" radius={[0, 5, 5, 0]} />
+            </BarChart>
+          </ResponsiveContainer></div>
+        </div>
+
+        <div className="card card-pad">
+          <div className="card-title" style={{ marginBottom: 10 }}>Customer Acquisition</div>
+          <div className="card-sub" style={{ marginBottom: 8 }}>New customers per week · last 12 weeks</div>
+          <div style={{ height: 232 }}><ResponsiveContainer>
+            <AreaChart data={a.acquisition || []}>
+              <defs><linearGradient id="acq" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.35} /><stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} /></linearGradient></defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="week" tick={AXIS} /><YAxis tick={AXIS} width={30} allowDecimals={false} />
+              <Tooltip contentStyle={tip} />
+              <Area type="monotone" dataKey="customers" stroke="#8b5cf6" strokeWidth={2} fill="url(#acq)" />
+            </AreaChart>
+          </ResponsiveContainer></div>
+        </div>
+
+        <div className="card card-pad">
           <div className="card-title" style={{ marginBottom: 10 }}>Service Revenue</div>
           <div className="table-wrap">
             <table className="tbl">
@@ -85,4 +128,8 @@ export default function Analytics() {
       </div>
     </>
   );
+}
+
+function EmptyChart({ label }) {
+  return <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: 'var(--text-3)', fontSize: 13 }}>{label}</div>;
 }

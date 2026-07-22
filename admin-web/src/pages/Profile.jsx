@@ -4,9 +4,11 @@ import Icon from '../components/Icon';
 import { Badge, initials } from '../components/ui';
 import { sa } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/Toast';
 
 export default function Profile() {
   const { user, logout } = useAuth();
+  const { toast } = useToast();
   const [f, setF] = useState({ firstName: user.firstName, lastName: user.lastName, phone: user.phone || '' });
   const [pw, setPw] = useState({ currentPassword: '', newPassword: '' });
   const [msg, setMsg] = useState(null);
@@ -23,8 +25,8 @@ export default function Profile() {
     setBusy(true); setMsg(null);
     try {
       const r = await sa.changePassword(pw);
-      alert(r.data.message + ' Please sign in again.');
-      logout();
+      toast.success((r.data.message || 'Password changed') + ' Signing you out…');
+      setTimeout(logout, 1200);
     } catch (e) { setMsg({ err: e.response?.data?.error || 'Failed' }); } finally { setBusy(false); }
   }
 

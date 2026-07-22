@@ -1,14 +1,16 @@
 import { useEffect, useState, useCallback } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Kpi, Badge, money, fmtDateTime, Loading, Empty, exportCsv } from '../components/ui';
+import { Kpi, Badge, money, fmtDateTime, SkeletonTable, Empty, exportCsv } from '../components/ui';
 import { sa } from '../api/client';
 import { payApi } from '../api/client';
+import { useToast } from '../components/Toast';
 
 const PAY_STATUS = { paid: '#10b981', pending: '#f59e0b', failed: '#ef4444', refunded: '#6366f1' };
 const STATUSES = ['', 'paid', 'pending', 'failed', 'refunded'];
 
 export default function Payments() {
+  const { toast, confirm } = useToast();
   const [data, setData] = useState(null);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('');
@@ -24,10 +26,10 @@ export default function Payments() {
   useEffect(() => { load(1); }, [status, method]); // eslint-disable-line
 
   async function refund(t) {
-    if (!window.confirm(`Refund ${money(t.amount)} for ${t.orderNumber}?`)) return;
+    if (!(await confirm({ title: 'Issue refund', message: `Refund ${money(t.amount)} for ${t.orderNumber}? This returns funds to the customer.`, danger: true, confirmLabel: 'Refund' }))) return;
     setBusy(t.id);
-    try { await payApi.refund(t.reference); await load(page); }
-    catch (e) { alert(e.response?.data?.error || 'Refund failed.'); }
+    try { await payApi.refund(t.reference); toast.success('Refund issued'); await load(page); }
+    catch (e) { toast.error(e.response?.data?.error || 'Refund failed.'); }
     finally { setBusy(null); }
   }
 
@@ -54,8 +56,9 @@ export default function Payments() {
         <select className="input" value={method} onChange={(e) => setMethod(e.target.value)}><option value="">All methods</option><option value="momo">Mobile Money</option><option value="card">Card</option></select>
       </div>
 
+      {data == null ? <SkeletonTable cols={8} /> : (
       <div className="card">
-        {data == null ? <Loading /> : data.transactions.length === 0 ? <Empty title="No transactions" /> : (
+        {data.transactions.length === 0 ? <Empty title="No transactions" /> : (
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr><th>Reference</th><th>Order</th><th>Customer</th><th>Method</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr></thead>
@@ -83,6 +86,7 @@ export default function Payments() {
           </div>
         )}
       </div>
+      )}
     </>
   );
 }

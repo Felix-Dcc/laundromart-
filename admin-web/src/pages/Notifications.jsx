@@ -2,6 +2,7 @@ import { useState } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
 import { sa } from '../api/client';
+import { useToast } from '../components/Toast';
 
 const AUDIENCES = [
   { key: 'all', label: 'Everyone', icon: 'users', tint: '#4f46e5' },
@@ -12,6 +13,7 @@ const AUDIENCES = [
 ];
 
 export default function Notifications() {
+  const { confirm } = useToast();
   const [audience, setAudience] = useState('all');
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
@@ -20,7 +22,7 @@ export default function Notifications() {
 
   async function send() {
     if (!title.trim() || !message.trim()) { setResult({ err: 'Title and message are required.' }); return; }
-    if (!window.confirm(`Send this broadcast to "${AUDIENCES.find((a) => a.key === audience).label}"?`)) return;
+    if (!(await confirm({ title: 'Send broadcast', message: `Send to "${AUDIENCES.find((a) => a.key === audience).label}"? This reaches everyone in that group.` }))) return;
     setBusy(true); setResult(null);
     try {
       const r = await sa.broadcast({ audience, title: title.trim(), message: message.trim() });

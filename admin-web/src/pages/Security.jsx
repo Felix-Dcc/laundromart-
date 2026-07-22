@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Kpi, Badge, Loading, Empty, fmtDateTime } from '../components/ui';
+import { Kpi, Badge, SkeletonKpis, Empty, fmtDateTime } from '../components/ui';
 import { sa } from '../api/client';
+import { useToast } from '../components/Toast';
 
 export default function Security() {
+  const { toast, confirm } = useToast();
   const [d, setD] = useState(null);
   const [busy, setBusy] = useState(null);
 
@@ -12,12 +14,12 @@ export default function Security() {
   useEffect(() => { load(); }, []);
 
   async function revoke(s) {
-    if (!window.confirm(`Force-logout ${s.user}? Their session will end immediately.`)) return;
+    if (!(await confirm({ title: 'Force logout', message: `End ${s.user}'s session immediately?`, danger: true, confirmLabel: 'Force logout' }))) return;
     setBusy(s.id);
-    try { await sa.revokeSession(s.id); await load(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(null); }
+    try { await sa.revokeSession(s.id); toast.success('Session revoked'); await load(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); } finally { setBusy(null); }
   }
 
-  if (!d) return <Loading label="Loading security…" />;
+  if (!d) return <SkeletonKpis count={3} />;
 
   return (
     <>

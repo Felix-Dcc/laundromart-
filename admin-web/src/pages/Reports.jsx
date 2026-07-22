@@ -3,6 +3,7 @@ import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
 import { exportCsv, money } from '../components/ui';
 import { adminApi, sa } from '../api/client';
+import { useToast } from '../components/Toast';
 
 const REPORTS = [
   { key: 'orders', title: 'Orders Report', desc: 'All orders with status, amount & parties', icon: 'orders', tint: '#4f46e5',
@@ -20,14 +21,16 @@ const REPORTS = [
 ];
 
 export default function Reports() {
+  const { toast } = useToast();
   const [busy, setBusy] = useState(null);
   async function run(r) {
     setBusy(r.key);
     try {
       const rows = await r.fetch();
-      if (!rows?.length) { alert('No data to export for this report.'); return; }
+      if (!rows?.length) { toast.info('No data to export for this report.'); return; }
       exportCsv(`${r.key}-report.csv`, rows);
-    } catch (e) { alert('Failed to generate report.'); }
+      toast.success(`${r.title} exported (${rows.length} rows)`);
+    } catch (e) { toast.error('Failed to generate report.'); }
     finally { setBusy(null); }
   }
 

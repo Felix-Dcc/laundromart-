@@ -2,9 +2,10 @@ import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { StatusBadge, Drawer, Modal, money, fmtDateTime, Loading, Empty } from '../components/ui';
+import { StatusBadge, Drawer, Modal, money, fmtDateTime, SkeletonTable, Skeleton, Empty } from '../components/ui';
 import { adminApi } from '../api/client';
 import { onOrderFeed } from '../lib/socket';
+import { useToast } from '../components/Toast';
 
 const STATUS_FILTERS = ['', 'awaiting_rider', 'rider_assigned', 'picked_up', 'at_laundromat', 'weight_verified', 'washing', 'ready_for_delivery', 'out_for_delivery', 'delivered', 'completed', 'cancelled'];
 
@@ -40,8 +41,9 @@ export default function Orders() {
         <button className="btn" onClick={() => load(page)}><Icon name="refresh" size={15} /> Refresh</button>
       </div>
 
+      {rows == null ? <SkeletonTable cols={7} /> : (
       <div className="card">
-        {rows == null ? <Loading /> : rows.length === 0 ? <Empty title="No orders found" /> : (
+        {rows.length === 0 ? <Empty title="No orders found" /> : (
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr><th>Order</th><th>Customer</th><th>Laundromat</th><th>Status</th><th>Amount</th><th>Payment</th><th>Created</th></tr></thead>
@@ -71,6 +73,7 @@ export default function Orders() {
           </div>
         )}
       </div>
+      )}
 
       {openId && <OrderDrawer id={openId} onClose={() => setOpenId(null)} onChanged={() => load(page)} />}
     </>
@@ -78,6 +81,7 @@ export default function Orders() {
 }
 
 function OrderDrawer({ id, onClose, onChanged }) {
+  const { toast, confirm } = useToast();
   const [order, setOrder] = useState(null);
   const [riders, setRiders] = useState([]);
   const [reassign, setReassign] = useState(false);
@@ -90,10 +94,10 @@ function OrderDrawer({ id, onClose, onChanged }) {
   useEffect(() => { load(); }, [id]); // eslint-disable-line
 
   async function act(fn, confirmMsg) {
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    if (confirmMsg && !(await confirm({ title: 'Confirm action', message: confirmMsg, danger: /cancel|refund/i.test(confirmMsg) }))) return;
     setBusy(true);
-    try { await fn(); await load(); onChanged(); }
-    catch (e) { alert(e.response?.data?.error || 'Action failed.'); }
+    try { await fn(); toast.success('Done'); await load(); onChanged(); }
+    catch (e) { toast.error(e.response?.data?.error || 'Action failed.'); }
     finally { setBusy(false); }
   }
   async function openReassign() {
@@ -112,7 +116,7 @@ function OrderDrawer({ id, onClose, onChanged }) {
           {canCancel && <button className="btn danger" disabled={busy} onClick={() => act(() => adminApi.setOrderStatus(id, { newStatus: 'cancelled', adminNotes: 'Cancelled by admin' }), 'Cancel this order?')}><Icon name="x" size={15} /> Cancel</button>}
         </>
       )}>
-      {!order ? <Loading /> : (
+      {!order ? <div className="grid" style={{ gap: 12 }}><Skeleton h={64} r={12} /><Skeleton h={120} r={12} /><Skeleton h={90} r={12} /></div> : (
         <div className="grid" style={{ gap: 16 }}>
           <div className="spread"><StatusBadge status={order.status} /><span className="mono" style={{ fontWeight: 800, fontSize: 18 }}>{money(order.amountDue)}</span></div>
 

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, Modal, Loading, Empty, money, fmtDate } from '../components/ui';
+import { Badge, Modal, SkeletonTable, Empty, money, fmtDate } from '../components/ui';
 import { sa } from '../api/client';
+import { useToast } from '../components/Toast';
 
 function promoStatus(p) {
   if (!p.active) return ['Inactive', '#6b7280'];
@@ -12,14 +13,15 @@ function promoStatus(p) {
 }
 
 export default function Promotions() {
+  const { toast, confirm } = useToast();
   const [rows, setRows] = useState(null);
   const [create, setCreate] = useState(false);
 
   async function load() { setRows(null); const r = await sa.promotions(); setRows(r.data.promotions); }
   useEffect(() => { load(); }, []);
 
-  async function toggle(p) { try { await sa.patchPromo(p.id, { active: !p.active }); load(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } }
-  async function del(p) { if (!window.confirm(`Delete promo ${p.code}?`)) return; try { await sa.deletePromo(p.id); load(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } }
+  async function toggle(p) { try { await sa.patchPromo(p.id, { active: !p.active }); toast.success(p.active ? 'Promo deactivated' : 'Promo activated'); load(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); } }
+  async function del(p) { if (!(await confirm({ title: 'Delete promo', message: `Delete code ${p.code}?`, danger: true, confirmLabel: 'Delete' }))) return; try { await sa.deletePromo(p.id); toast.success('Promo deleted'); load(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); } }
 
   const active = (rows || []).filter((p) => promoStatus(p)[0] === 'Active').length;
 
@@ -28,8 +30,9 @@ export default function Promotions() {
       <PageHead title="Promotions" sub={`Promo codes & discounts · ${active} active`}
         actions={<button className="btn primary" onClick={() => setCreate(true)}><Icon name="promo" size={15} /> New Promo Code</button>} />
 
+      {rows == null ? <SkeletonTable cols={7} /> : (
       <div className="card">
-        {rows == null ? <Loading /> : rows.length === 0 ? <Empty title="No promotions yet" sub="Create your first promo code to run a campaign." /> : (
+        {rows.length === 0 ? <Empty title="No promotions yet" sub="Create your first promo code to run a campaign." /> : (
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr><th>Code</th><th>Discount</th><th>Min Order</th><th>Usage</th><th>Window</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
@@ -58,6 +61,7 @@ export default function Promotions() {
           </div>
         )}
       </div>
+      )}
 
       <div className="card card-pad" style={{ marginTop: 16, color: 'var(--text-2)', fontSize: 13 }}>
         <Icon name="promo" size={14} /> Referral campaigns, loyalty rewards and seasonal automations build on this promo engine — coming next.
@@ -69,12 +73,13 @@ export default function Promotions() {
 }
 
 function CreatePromo({ onClose, onDone }) {
+  const { toast } = useToast();
   const [f, setF] = useState({ code: '', type: 'percent', value: '', minOrder: '', maxUses: '', expiresAt: '', description: '' });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   async function save() {
     setBusy(true);
-    try { await sa.createPromo(f); onDone(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+    try { await sa.createPromo(f); toast.success('Promo created'); onDone(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
   }
   return (
     <Modal title="New Promo Code" onClose={onClose} actions={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Create</button></>}>

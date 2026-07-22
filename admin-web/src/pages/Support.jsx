@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, Modal, Drawer, Loading, Empty, fmtDateTime, initials } from '../components/ui';
+import { Badge, Modal, Drawer, SkeletonTable, Empty, fmtDateTime, initials } from '../components/ui';
 import { supportApi, adminApi } from '../api/client';
+import { useToast } from '../components/Toast';
 
 const STATUS = { open: '#0ea5e9', pending: '#f59e0b', resolved: '#10b981', closed: '#6b7280' };
 const FILTERS = ['', 'open', 'pending', 'resolved', 'closed'];
@@ -26,8 +27,9 @@ export default function Support() {
         <button className="btn" onClick={load}><Icon name="refresh" size={15} /> Refresh</button>
       </div>
 
+      {rows == null ? <SkeletonTable cols={6} /> : (
       <div className="card">
-        {rows == null ? <Loading /> : rows.length === 0 ? <Empty title="No tickets" sub="Support tickets appear here as customers raise them." /> : (
+        {rows.length === 0 ? <Empty title="No tickets" sub="Support tickets appear here as customers raise them." /> : (
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr><th>Subject</th><th>Customer</th><th>Last message</th><th>Msgs</th><th>Status</th><th>Updated</th></tr></thead>
@@ -47,6 +49,7 @@ export default function Support() {
           </div>
         )}
       </div>
+      )}
 
       {openId && <TicketDrawer id={openId} onClose={() => setOpenId(null)} onChanged={load} />}
       {create && <CreateTicket onClose={() => setCreate(false)} onDone={() => { setCreate(false); load(); }} />}
@@ -55,6 +58,7 @@ export default function Support() {
 }
 
 function TicketDrawer({ id, onClose, onChanged }) {
+  const { toast } = useToast();
   const [t, setT] = useState(null);
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
@@ -65,9 +69,9 @@ function TicketDrawer({ id, onClose, onChanged }) {
   async function send() {
     if (!reply.trim()) return;
     setBusy(true);
-    try { await supportApi.reply(id, reply.trim()); setReply(''); await load(); onChanged(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+    try { await supportApi.reply(id, reply.trim()); setReply(''); await load(); onChanged(); } catch (e) { toast.error(e.response?.data?.error || 'Failed to send reply'); } finally { setBusy(false); }
   }
-  async function setStatus(s) { try { await supportApi.setStatus(id, s); await load(); onChanged(); } catch (e) { alert('Failed'); } }
+  async function setStatus(s) { try { await supportApi.setStatus(id, s); toast.success(`Ticket marked ${s}`); await load(); onChanged(); } catch (e) { toast.error('Failed to update status'); } }
 
   return (
     <Drawer title={t ? t.subject : 'Ticket'} onClose={onClose}
@@ -100,15 +104,16 @@ function TicketDrawer({ id, onClose, onChanged }) {
 }
 
 function CreateTicket({ onClose, onDone }) {
+  const { toast } = useToast();
   const [users, setUsers] = useState([]);
   const [f, setF] = useState({ userId: '', subject: '', message: '' });
   const [busy, setBusy] = useState(false);
   useEffect(() => { adminApi.users({ page: 1, userType: 'user' }).then((r) => setUsers(r.data.users)); }, []);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   async function save() {
-    if (!f.userId || !f.subject.trim() || !f.message.trim()) { alert('Pick a customer and fill subject + message.'); return; }
+    if (!f.userId || !f.subject.trim() || !f.message.trim()) { toast.warn('Pick a customer and fill subject + message.'); return; }
     setBusy(true);
-    try { await supportApi.create(f); onDone(); } catch (e) { alert(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
+    try { await supportApi.create(f); toast.success('Ticket logged'); onDone(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); } finally { setBusy(false); }
   }
   return (
     <Modal title="Log a Ticket" onClose={onClose} actions={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Create</button></>}>

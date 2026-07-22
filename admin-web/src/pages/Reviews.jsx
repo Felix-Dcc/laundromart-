@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Loading, Empty, fmtDate } from '../components/ui';
+import { SkeletonTable, Empty, fmtDate } from '../components/ui';
 import { sa } from '../api/client';
+import { useToast } from '../components/Toast';
 
 const Stars = ({ n }) => <span style={{ color: '#f59e0b', letterSpacing: 1 }}>{'★'.repeat(n)}<span style={{ color: 'var(--border)' }}>{'★'.repeat(5 - n)}</span></span>;
 
 export default function Reviews() {
+  const { toast, confirm } = useToast();
   const [rows, setRows] = useState(null);
   const [min, setMin] = useState(0);
 
@@ -14,8 +16,8 @@ export default function Reviews() {
   useEffect(() => { load(); }, []);
 
   async function del(r) {
-    if (!window.confirm('Remove this review? The provider rating will be recalculated.')) return;
-    try { await sa.deleteReview(r.id); load(); } catch (e) { alert(e.response?.data?.error || 'Failed'); }
+    if (!(await confirm({ title: 'Remove review', message: 'The provider rating will be recalculated.', danger: true, confirmLabel: 'Remove' }))) return;
+    try { await sa.deleteReview(r.id); toast.success('Review removed'); load(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
   }
 
   const list = (rows || []).filter((r) => r.rating >= min);
@@ -31,8 +33,9 @@ export default function Reviews() {
         <button className="btn" onClick={load}><Icon name="refresh" size={15} /> Refresh</button>
       </div>
 
+      {rows == null ? <SkeletonTable cols={7} /> : (
       <div className="card">
-        {rows == null ? <Loading /> : list.length === 0 ? <Empty title="No reviews" sub="Reviews appear once customers rate completed orders." /> : (
+        {list.length === 0 ? <Empty title="No reviews" sub="Reviews appear once customers rate completed orders." /> : (
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr><th>Rating</th><th>Provider</th><th>Author</th><th>Comment</th><th>Order</th><th>Date</th><th></th></tr></thead>
@@ -53,6 +56,7 @@ export default function Reviews() {
           </div>
         )}
       </div>
+      )}
     </>
   );
 }

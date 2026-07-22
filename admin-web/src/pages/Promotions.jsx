@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
 import { Badge, Modal, SkeletonTable, Empty, money, fmtDate } from '../components/ui';
@@ -17,8 +18,10 @@ export default function Promotions() {
   const [rows, setRows] = useState(null);
   const [create, setCreate] = useState(false);
 
+  const [params] = useSearchParams();
   async function load() { setRows(null); const r = await sa.promotions(); setRows(r.data.promotions); }
   useEffect(() => { load(); }, []);
+  useEffect(() => { if (params.get('new') === '1') setCreate(true); }, [params]);
 
   async function toggle(p) { try { await sa.patchPromo(p.id, { active: !p.active }); toast.success(p.active ? 'Promo deactivated' : 'Promo activated'); load(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); } }
   async function del(p) { if (!(await confirm({ title: 'Delete promo', message: `Delete code ${p.code}?`, danger: true, confirmLabel: 'Delete' }))) return; try { await sa.deletePromo(p.id); toast.success('Promo deleted'); load(); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); } }

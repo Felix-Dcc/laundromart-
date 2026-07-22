@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
 import { Badge, money, Modal, SkeletonTable, Empty, initials, fmtDateTime } from '../components/ui';
@@ -14,8 +14,10 @@ export default function Riders() {
   const [busyId, setBusyId] = useState(null);
   const [create, setCreate] = useState(false);
 
+  const [params] = useSearchParams();
   async function load() { setRows(null); const r = await sa.riders(); setRows(r.data.riders); }
   useEffect(() => { load(); }, []);
+  useEffect(() => { if (params.get('new') === '1') setCreate(true); }, [params]);
 
   async function patch(id, body) {
     setBusyId(id);

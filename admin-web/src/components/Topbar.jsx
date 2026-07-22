@@ -1,9 +1,34 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from './Icon';
 import { initials } from './ui';
+import { api } from '../api/client';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+
+// Live API/DB health indicator — polls the public health endpoint.
+function SystemStatus() {
+  const [state, setState] = useState('ok');
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const r = await api.get('/health', { timeout: 6000 });
+        if (alive) setState(r.data?.db === 'up' ? 'ok' : 'warn');
+      } catch { if (alive) setState('down'); }
+    };
+    check();
+    const t = setInterval(check, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  const label = state === 'ok' ? 'All systems operational' : state === 'warn' ? 'Degraded' : 'Connection issue';
+  return (
+    <span className={`sys-status ${state}`} title={label} role="status">
+      <span className="d" style={{ background: 'currentColor' }} />
+      <span className="sys-label">{label}</span>
+    </span>
+  );
+}
 
 export default function Topbar({ onToggleSidebar, onToggleMobile }) {
   const { theme, toggle } = useTheme();
@@ -33,7 +58,8 @@ export default function Topbar({ onToggleSidebar, onToggleMobile }) {
       </form>
 
       <div className="topbar-right">
-        <button className="icon-btn" onClick={toggle} title="Toggle theme">
+        <SystemStatus />
+        <button className="icon-btn" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">
           <Icon name={theme === 'light' ? 'moon' : 'sun'} size={17} />
         </button>
         <button className="icon-btn bell" onClick={() => nav('/notifications')} title="Notifications">

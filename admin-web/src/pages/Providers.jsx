@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
 import { Badge, money, Modal, SkeletonTable, Empty, initials } from '../components/ui';
@@ -12,8 +13,10 @@ export default function Providers() {
   const [busyId, setBusyId] = useState(null);
   const [create, setCreate] = useState(false);
 
+  const [params] = useSearchParams();
   async function load() { setRows(null); const r = await sa.providers(search || undefined); setRows(r.data.providers); }
   useEffect(() => { load(); }, []); // eslint-disable-line
+  useEffect(() => { if (params.get('new') === '1') setCreate(true); }, [params]);
 
   async function patch(id, body) {
     setBusyId(id);

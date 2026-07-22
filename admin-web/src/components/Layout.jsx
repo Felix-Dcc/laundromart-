@@ -4,6 +4,7 @@ import Sidebar, { NAV } from './Sidebar';
 import Topbar from './Topbar';
 import Icon from './Icon';
 import ErrorBoundary from './ErrorBoundary';
+import CommandPalette from './CommandPalette';
 import { sa } from '../api/client';
 
 const LABELS = Object.fromEntries(NAV.flatMap((g) => g.items).map((i) => [i.to, i.label]));
@@ -40,6 +41,7 @@ export default function Layout() {
 
   return (
     <div className="shell">
+      <CommandPalette />
       <Sidebar collapsed={collapsed} mobileOpen={mobileOpen} pending={pending} />
       <div className={`sidebar-backdrop ${mobileOpen ? 'show' : ''}`} onClick={() => setMobileOpen(false)} />
       <div className="main">

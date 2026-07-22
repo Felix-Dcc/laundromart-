@@ -267,6 +267,12 @@ select.input { padding-right: 28px; }
 .cmdk-foot { display: flex; gap: 16px; padding: 10px 16px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 11.5px; }
 .cmdk-foot kbd { border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-right: 3px; font-size: 10px; }
 
+/* ── Segmented control (time-range filter) ── */
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; }
+.seg-btn { border: 0; background: transparent; color: var(--text-2); font-size: 12.5px; font-weight: 600; padding: 5px 12px; border-radius: 7px; }
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active { background: var(--surface); color: var(--brand); box-shadow: var(--shadow); }
+
 /* ── System-status indicator (topbar) ── */
 .sys-status { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; font-weight: 600; color: var(--text-2); }
 .sys-status .d { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent); }

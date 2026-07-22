@@ -29,11 +29,12 @@ router.get('/overview', async (req, res) => {
 
     const [
       revTotal, revToday, revMonth,
-      activeOrders, completedOrders, cancelledOrders, totalOrders,
+      activeOrders, completedOrders, cancelledOrders, totalOrders, todayOrders,
       totalUsers, totalProviders, totalRiders,
-      activeRiders, activeProviders,
+      onlineRiders, busyRiders, activeProviders, verifiedProviders,
       pendingProviders, pendingRiders,
       newUsersToday, newUsersThisMonth, newUsersLastMonth,
+      ratingAgg, deliveryRows,
     ] = await Promise.all([
       prisma.transaction.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
       prisma.transaction.aggregate({ where: { status: 'paid', paidAt: { gte: today } }, _sum: { amount: true } }),
@@ -42,28 +43,38 @@ router.get('/overview', async (req, res) => {
       prisma.laundryRequest.count({ where: { status: 'completed' } }),
       prisma.laundryRequest.count({ where: { status: 'cancelled' } }),
       prisma.laundryRequest.count(),
+      prisma.laundryRequest.count({ where: { createdAt: { gte: today } } }),
       prisma.user.count({ where: { userType: 'user' } }),
       prisma.user.count({ where: { userType: 'provider' } }),
       prisma.user.count({ where: { userType: 'rider' } }),
-      prisma.user.count({ where: { userType: 'rider', riderStatus: { in: ['online', 'busy'] } } }),
+      prisma.user.count({ where: { userType: 'rider', riderStatus: 'online' } }),
+      prisma.user.count({ where: { userType: 'rider', riderStatus: 'busy' } }),
       prisma.user.count({ where: { userType: 'provider', status: 'active', acceptingOrders: true } }),
+      prisma.user.count({ where: { userType: 'provider', isVerified: true } }),
       prisma.user.count({ where: { userType: 'provider', providerApproved: false } }),
       prisma.user.count({ where: { userType: 'rider', riderApproved: false } }),
       prisma.user.count({ where: { userType: 'user', createdAt: { gte: today } } }),
       prisma.user.count({ where: { userType: 'user', createdAt: { gte: month } } }),
       prisma.user.count({ where: { userType: 'user', createdAt: { gte: lastMonthStart, lt: month } } }),
+      prisma.review.aggregate({ _avg: { rating: true }, _count: true }).catch(() => ({ _avg: { rating: null }, _count: 0 })),
+      prisma.$queryRaw`SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 60.0)::float AS mins
+                       FROM laundry_requests WHERE status = 'completed'`.catch(() => [{ mins: null }]),
     ]);
 
     const growth = newUsersLastMonth > 0
       ? Math.round(((newUsersThisMonth - newUsersLastMonth) / newUsersLastMonth) * 1000) / 10
       : (newUsersThisMonth > 0 ? 100 : 0);
+    const completionRate = totalOrders > 0 ? Math.round((completedOrders / totalOrders) * 1000) / 10 : 0;
+    const cancellationRate = totalOrders > 0 ? Math.round((cancelledOrders / totalOrders) * 1000) / 10 : 0;
+    const avgDeliveryMins = deliveryRows?.[0]?.mins != null ? Math.round(deliveryRows[0].mins) : null;
 
     res.json({
       revenue: { total: num(revTotal._sum.amount), today: num(revToday._sum.amount), month: num(revMonth._sum.amount) },
-      orders: { active: activeOrders, completed: completedOrders, cancelled: cancelledOrders, total: totalOrders },
+      orders: { active: activeOrders, completed: completedOrders, cancelled: cancelledOrders, total: totalOrders, today: todayOrders, completionRate, cancellationRate },
       users: { total: totalUsers, newToday: newUsersToday },
-      providers: { total: totalProviders, active: activeProviders, pending: pendingProviders },
-      riders: { total: totalRiders, active: activeRiders, pending: pendingRiders },
+      providers: { total: totalProviders, active: activeProviders, verified: verifiedProviders, pending: pendingProviders },
+      riders: { total: totalRiders, online: onlineRiders, busy: busyRiders, active: onlineRiders + busyRiders, pending: pendingRiders },
+      quality: { avgRating: ratingAgg._avg.rating != null ? Math.round(ratingAgg._avg.rating * 100) / 100 : null, reviewCount: ratingAgg._count || 0, avgDeliveryMins },
       growth,
     });
   } catch (error) {
@@ -77,7 +88,7 @@ router.get('/overview', async (req, res) => {
 // ============================================================
 router.get('/timeseries', async (req, res) => {
   try {
-    const days = Math.min(90, Math.max(7, parseInt(req.query.days) || 14));
+    const days = Math.min(365, Math.max(7, parseInt(req.query.days) || 14));
     const since = daysAgo(days - 1);
 
     const [revRows, orderRows, userRows, peakRows] = await Promise.all([

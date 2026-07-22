@@ -159,6 +159,35 @@ export function SkeletonTable({ rows = 6, cols = 5 }) {
   );
 }
 
+// ── Bulk-select checkbox (tri-state header supported via `indeterminate`) ──
+export function Check({ checked, indeterminate, onChange, label }) {
+  const ref = useRef(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate && !checked; }, [indeterminate, checked]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      className="row-check"
+      checked={!!checked}
+      aria-label={label || 'Select row'}
+      onChange={onChange}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}
+
+// ── Floating bulk-action bar shown when rows are selected. ──
+export function BulkBar({ count, onClear, children }) {
+  if (!count) return null;
+  return (
+    <div className="bulkbar" role="region" aria-label="Bulk actions">
+      <span className="bulkbar-count">{count} selected</span>
+      <div className="bulkbar-actions">{children}</div>
+      <button className="btn sm ghost" onClick={onClear}>Clear</button>
+    </div>
+  );
+}
+
 export function SkeletonKpis({ count = 8 }) {
   return (
     <div className="kpi-grid" aria-busy="true" aria-label="Loading metrics">

@@ -2,10 +2,11 @@ import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, Modal, fmtDate, SkeletonTable, Empty, initials } from '../components/ui';
+import { Badge, Modal, fmtDate, SkeletonTable, Empty, initials, Check, BulkBar } from '../components/ui';
 import { adminApi, sa } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
+import { useBulkSelect } from '../hooks/useBulkSelect';
 
 export default function Users() {
   const { isSuper } = useAuth();
@@ -17,6 +18,7 @@ export default function Users() {
   const [search, setSearch] = useState(params.get('q') || '');
   const [edit, setEdit] = useState(null);
   const [tempPw, setTempPw] = useState(null);
+  const sel = useBulkSelect((rows || []).map((u) => u.id));
 
   const load = useCallback(async (p = 1) => {
     setRows(null);
@@ -36,6 +38,18 @@ export default function Users() {
     if (!(await confirm({ title: 'Reset password', message: `Generate a new temporary password for ${u.email}?` }))) return;
     try { const r = await sa.resetPassword(u.id); setTempPw({ email: u.email, pw: r.data.temporaryPassword }); } catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
   }
+  async function bulk(kind) {
+    const ids = sel.ids;
+    if (!ids.length) return;
+    const label = { suspend: 'Suspend', activate: 'Activate', delete: 'Delete' }[kind];
+    if (!(await confirm({ title: `${label} ${ids.length} user${ids.length > 1 ? 's' : ''}?`, message: kind === 'delete' ? 'This cannot be undone.' : undefined, danger: kind !== 'activate', confirmLabel: label }))) return;
+    const call = kind === 'delete' ? (id) => sa.deleteUser(id) : (id) => sa.patchUser(id, { status: kind === 'suspend' ? 'inactive' : 'active' });
+    const res = await Promise.allSettled(ids.map(call));
+    const ok = res.filter((r) => r.status === 'fulfilled').length;
+    if (ok) toast.success(`${label}${kind === 'delete' ? 'd' : kind === 'suspend' ? 'ed' : 'd'} ${ok} user${ok > 1 ? 's' : ''}`);
+    if (res.length - ok) toast.error(`${res.length - ok} failed`);
+    sel.clear(); await load(page);
+  }
 
   return (
     <>
@@ -53,10 +67,13 @@ export default function Users() {
         {rows.length === 0 ? <Empty title="No users found" /> : (
           <div className="table-wrap">
             <table className="tbl">
-              <thead><tr><th>User</th><th>Email</th><th>Phone</th><th>Orders</th><th>Status</th><th>Joined</th><th></th></tr></thead>
+              <thead><tr>
+                <th className="check-col"><Check checked={sel.allSelected} indeterminate={sel.someSelected} onChange={sel.toggleAll} label="Select all users" /></th>
+                <th>User</th><th>Email</th><th>Phone</th><th>Orders</th><th>Status</th><th>Joined</th><th></th></tr></thead>
               <tbody>
                 {rows.map((u) => (
-                  <tr key={u.id}>
+                  <tr key={u.id} className={sel.has(u.id) ? 'selected' : ''}>
+                    <td className="check-col"><Check checked={sel.has(u.id)} onChange={() => sel.toggle(u.id)} label={`Select ${u.firstName} ${u.lastName}`} /></td>
                     <td><div className="row"><div className="avatar" style={{ width: 30, height: 30, fontSize: 12 }}>{initials(`${u.firstName} ${u.lastName}`)}</div><span style={{ fontWeight: 600 }}>{u.firstName} {u.lastName}</span></div></td>
                     <td className="muted">{u.email}</td>
                     <td className="muted">{u.phone}</td>
@@ -85,6 +102,12 @@ export default function Users() {
         )}
       </div>
       )}
+
+      <BulkBar count={sel.count} onClear={sel.clear}>
+        <button className="btn sm" onClick={() => bulk('activate')}>Activate</button>
+        <button className="btn sm danger" onClick={() => bulk('suspend')}>Suspend</button>
+        {isSuper && <button className="btn sm danger" onClick={() => bulk('delete')}>Delete</button>}
+      </BulkBar>
 
       {edit && <EditUser user={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(page); }} />}
       {tempPw && (

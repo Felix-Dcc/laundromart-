@@ -2,17 +2,19 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, money, Modal, SkeletonTable, Empty, initials, fmtDateTime } from '../components/ui';
+import { Badge, money, Modal, SkeletonTable, Empty, initials, fmtDateTime, Check, BulkBar } from '../components/ui';
 import { sa } from '../api/client';
 import { useToast } from '../components/Toast';
+import { useBulkSelect } from '../hooks/useBulkSelect';
 
 const RIDER = { online: '#10b981', busy: '#f59e0b', offline: '#6b7280' };
 
 export default function Riders() {
-  const { toast } = useToast();
+  const { toast, confirm } = useToast();
   const [rows, setRows] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [create, setCreate] = useState(false);
+  const sel = useBulkSelect((rows || []).map((r) => r.id));
 
   const [params] = useSearchParams();
   async function load() { setRows(null); const r = await sa.riders(); setRows(r.data.riders); }
@@ -22,6 +24,19 @@ export default function Riders() {
   async function patch(id, body) {
     setBusyId(id);
     try { await sa.patchRider(id, body); toast.success('Rider updated'); await load(); } catch (e) { toast.error(e.response?.data?.error || 'Update failed'); } finally { setBusyId(null); }
+  }
+
+  // Run a PATCH across every selected rider, with one confirm + summary toast.
+  async function bulk(body, verb) {
+    const ids = sel.ids;
+    if (!ids.length) return;
+    if (!(await confirm({ title: `${verb} ${ids.length} rider${ids.length > 1 ? 's' : ''}?`, danger: /suspend|reject/i.test(verb), confirmLabel: verb }))) return;
+    const res = await Promise.allSettled(ids.map((id) => sa.patchRider(id, body)));
+    const ok = res.filter((r) => r.status === 'fulfilled').length;
+    const failed = res.length - ok;
+    if (ok) toast.success(`${verb} ${ok} rider${ok > 1 ? 's' : ''}`);
+    if (failed) toast.error(`${failed} failed`);
+    sel.clear(); await load();
   }
 
   const online = (rows || []).filter((r) => r.riderStatus === 'online' || r.riderStatus === 'busy').length;
@@ -37,10 +52,13 @@ export default function Riders() {
         {rows.length === 0 ? <Empty title="No riders" /> : (
           <div className="table-wrap">
             <table className="tbl">
-              <thead><tr><th>Rider</th><th>Status</th><th>Pickups</th><th>Earnings</th><th>Last Seen</th><th>Approval</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              <thead><tr>
+                <th className="check-col"><Check checked={sel.allSelected} indeterminate={sel.someSelected} onChange={sel.toggleAll} label="Select all riders" /></th>
+                <th>Rider</th><th>Status</th><th>Pickups</th><th>Earnings</th><th>Last Seen</th><th>Approval</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} className={sel.has(r.id) ? 'selected' : ''}>
+                    <td className="check-col"><Check checked={sel.has(r.id)} onChange={() => sel.toggle(r.id)} label={`Select ${r.name}`} /></td>
                     <td><div className="row"><div className="avatar" style={{ width: 30, height: 30, fontSize: 12 }}>{initials(r.name)}</div><div><div style={{ fontWeight: 600 }}>{r.name}</div><div className="muted" style={{ fontSize: 12 }}>{r.phone}</div></div></div></td>
                     <td><Badge text={r.riderStatus || 'offline'} color={RIDER[r.riderStatus] || '#6b7280'} /></td>
                     <td className="mono">{r.totalPickups}</td>
@@ -63,6 +81,12 @@ export default function Riders() {
         )}
       </div>
       )}
+
+      <BulkBar count={sel.count} onClear={sel.clear}>
+        <button className="btn sm ok" onClick={() => bulk({ approved: true }, 'Approve')}>Approve</button>
+        <button className="btn sm" onClick={() => bulk({ status: 'active' }, 'Activate')}>Activate</button>
+        <button className="btn sm danger" onClick={() => bulk({ status: 'inactive' }, 'Suspend')}>Suspend</button>
+      </BulkBar>
 
       {create && <CreateRider onClose={() => setCreate(false)} onDone={() => { setCreate(false); load(); }} />}
     </>

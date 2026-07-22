@@ -2,16 +2,18 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Badge, money, Modal, SkeletonTable, Empty, initials } from '../components/ui';
+import { Badge, money, Modal, SkeletonTable, Empty, initials, Check, BulkBar } from '../components/ui';
 import { sa } from '../api/client';
 import { useToast } from '../components/Toast';
+import { useBulkSelect } from '../hooks/useBulkSelect';
 
 export default function Providers() {
-  const { toast } = useToast();
+  const { toast, confirm } = useToast();
   const [rows, setRows] = useState(null);
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState(null);
   const [create, setCreate] = useState(false);
+  const sel = useBulkSelect((rows || []).map((p) => p.id));
 
   const [params] = useSearchParams();
   async function load() { setRows(null); const r = await sa.providers(search || undefined); setRows(r.data.providers); }
@@ -21,6 +23,17 @@ export default function Providers() {
   async function patch(id, body) {
     setBusyId(id);
     try { await sa.patchProvider(id, body); toast.success('Provider updated'); await load(); } catch (e) { toast.error(e.response?.data?.error || 'Update failed'); } finally { setBusyId(null); }
+  }
+
+  async function bulk(body, verb) {
+    const ids = sel.ids;
+    if (!ids.length) return;
+    if (!(await confirm({ title: `${verb} ${ids.length} laundromat${ids.length > 1 ? 's' : ''}?`, danger: /suspend|reject/i.test(verb), confirmLabel: verb }))) return;
+    const res = await Promise.allSettled(ids.map((id) => sa.patchProvider(id, body)));
+    const ok = res.filter((r) => r.status === 'fulfilled').length;
+    if (ok) toast.success(`${verb} ${ok} laundromat${ok > 1 ? 's' : ''}`);
+    if (res.length - ok) toast.error(`${res.length - ok} failed`);
+    sel.clear(); await load();
   }
 
   const pendingCount = (rows || []).filter((p) => !p.approved).length;
@@ -42,10 +55,13 @@ export default function Providers() {
         {rows.length === 0 ? <Empty title="No providers" /> : (
           <div className="table-wrap">
             <table className="tbl">
-              <thead><tr><th>Laundromat</th><th>Rating</th><th>Orders</th><th>Earnings</th><th>Status</th><th>Approval</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              <thead><tr>
+                <th className="check-col"><Check checked={sel.allSelected} indeterminate={sel.someSelected} onChange={sel.toggleAll} label="Select all providers" /></th>
+                <th>Laundromat</th><th>Rating</th><th>Orders</th><th>Earnings</th><th>Status</th><th>Approval</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
                 {rows.map((p) => (
-                  <tr key={p.id}>
+                  <tr key={p.id} className={sel.has(p.id) ? 'selected' : ''}>
+                    <td className="check-col"><Check checked={sel.has(p.id)} onChange={() => sel.toggle(p.id)} label={`Select ${p.name}`} /></td>
                     <td>
                       <div className="row">
                         <div className="avatar" style={{ width: 32, height: 32, fontSize: 12, borderRadius: 9 }}>{initials(p.name)}</div>
@@ -79,6 +95,13 @@ export default function Providers() {
         )}
       </div>
       )}
+
+      <BulkBar count={sel.count} onClear={sel.clear}>
+        <button className="btn sm ok" onClick={() => bulk({ approved: true }, 'Approve')}>Approve</button>
+        <button className="btn sm" onClick={() => bulk({ verified: true }, 'Verify')}>Verify</button>
+        <button className="btn sm" onClick={() => bulk({ status: 'active' }, 'Activate')}>Activate</button>
+        <button className="btn sm danger" onClick={() => bulk({ status: 'inactive' }, 'Suspend')}>Suspend</button>
+      </BulkBar>
 
       {create && <CreateProvider onClose={() => setCreate(false)} onDone={() => { setCreate(false); load(); }} />}
     </>

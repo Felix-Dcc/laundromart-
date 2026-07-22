@@ -8,6 +8,33 @@ const { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshTok
 const router = express.Router();
 const prisma = require('../lib/prisma');
 
+/**
+ * Verify a reCAPTCHA v3 token with Google. Returns { ok, reason }.
+ * Skipped entirely when no secret is configured, or when no token is sent
+ * (e.g. the mobile app), so existing clients keep working.
+ */
+async function verifyRecaptcha(token, remoteIp) {
+  if (!config.security.recaptchaSecret) return { ok: true, skipped: true };
+  if (!token) return { ok: true, skipped: true }; // client without reCAPTCHA (mobile)
+  try {
+    const params = new URLSearchParams({ secret: config.security.recaptchaSecret, response: token });
+    if (remoteIp) params.append('remoteip', remoteIp);
+    const resp = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params,
+    });
+    const data = await resp.json();
+    if (!data.success) return { ok: false, reason: 'reCAPTCHA failed. Please try again.' };
+    if (typeof data.score === 'number' && data.score < config.security.recaptchaMinScore) {
+      return { ok: false, reason: 'Suspicious activity detected. Please try again.' };
+    }
+    return { ok: true, score: data.score };
+  } catch (e) {
+    // Don't lock users out if Google is unreachable — fail open, but log it.
+    console.error('reCAPTCHA verify error:', e.message);
+    return { ok: true, degraded: true };
+  }
+}
+
 // POST /api/auth/register - User registration (mirrors register.php)
 router.post('/register', async (req, res) => {
   try {
@@ -84,7 +111,7 @@ function recordLoginAttempt(req, email, userId, success) {
 // POST /api/auth/login - User/Provider/Admin login (mirrors login.php + admin/login.php)
 router.post('/login', async (req, res) => {
   try {
-    const { email, password, fcmToken, twofaToken } = req.body;
+    const { email, password, fcmToken, twofaToken, recaptchaToken } = req.body;
 
     // Validation
     const errors = [];
@@ -94,6 +121,13 @@ router.post('/login', async (req, res) => {
 
     if (errors.length > 0) {
       return res.status(400).json({ errors });
+    }
+
+    // Bot protection (reCAPTCHA v3) — no-op unless a secret + token are present.
+    const captcha = await verifyRecaptcha(recaptchaToken, req.ip);
+    if (!captcha.ok) {
+      recordLoginAttempt(req, email, undefined, false);
+      return res.status(400).json({ errors: [captcha.reason] });
     }
 
     // Find user

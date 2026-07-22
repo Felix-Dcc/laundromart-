@@ -71,6 +71,10 @@ module.exports = {
   security: {
     corsOrigins, // [] => allow all (dev)
     trustProxy: process.env.TRUST_PROXY === 'true', // true when behind Nginx/load balancer
+    // reCAPTCHA v3 (admin dashboard login). Empty => verification skipped, so
+    // login keeps working before keys are configured.
+    recaptchaSecret: process.env.RECAPTCHA_SECRET_KEY || '',
+    recaptchaMinScore: parseFloat(process.env.RECAPTCHA_MIN_SCORE) || 0.5,
     rateLimit: {
       windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60_000,   // 1 min
       max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 1000,                // generous; NAT-safe

@@ -25,7 +25,7 @@ api.interceptors.response.use(
 
 // ── endpoint helpers ──
 export const authApi = {
-  login: (email, password, twofaToken) => api.post('/auth/login', { email, password, ...(twofaToken ? { twofaToken } : {}) }),
+  login: (email, password, twofaToken, recaptchaToken) => api.post('/auth/login', { email, password, ...(twofaToken ? { twofaToken } : {}), ...(recaptchaToken ? { recaptchaToken } : {}) }),
   me: () => api.get('/auth/me'),
 };
 export const sa = {

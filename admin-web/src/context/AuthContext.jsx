@@ -18,10 +18,10 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  async function login(email, password, twofaToken) {
+  async function login(email, password, twofaToken, recaptchaToken) {
     let r;
     try {
-      r = await authApi.login(email, password, twofaToken);
+      r = await authApi.login(email, password, twofaToken, recaptchaToken);
     } catch (err) {
       // 2FA gate: signal the login screen to collect a code.
       if (err.response?.status === 401 && err.response.data?.twofaRequired) {

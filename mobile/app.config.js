@@ -91,6 +91,8 @@ module.exports = {
     scheme: 'laundromat',
     // Lets OTA updates target compatible binaries automatically.
     runtimeVersion: { policy: 'appVersion' },
+    // EAS Update endpoint (over-the-air JS updates for this project).
+    updates: { url: 'https://u.expo.dev/f1db1707-fb6c-4c19-9c1b-d691917deb1d' },
     splash: {
       image: './assets/splash.png',
       resizeMode: 'contain',

@@ -19,8 +19,11 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL;
 const MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 // A production binary that ships pointing at a dev machine is unrecoverable
-// once submitted, so fail the build here rather than at review.
-if (IS_PROD) {
+// once submitted, so fail the build here rather than at review. Gate on
+// EAS_BUILD so this only runs inside the real cloud build (where EAS injects
+// the secrets) — not during `eas build`'s local config pre-eval, which sets
+// APP_ENV=production but intentionally doesn't load .env or the secrets.
+if (IS_PROD && process.env.EAS_BUILD) {
   const errors = [];
 
   if (!API_URL) {
@@ -154,7 +157,7 @@ module.exports = {
     ],
     extra: {
       appEnv: APP_ENV,
-      // `eas init` writes eas.projectId here on first run.
+      eas: { projectId: 'f1db1707-fb6c-4c19-9c1b-d691917deb1d' },
     },
   },
 };

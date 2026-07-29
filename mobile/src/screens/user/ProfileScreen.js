@@ -6,7 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
-import { userAPI } from '../../api/client';
+import { userAPI, authAPI } from '../../api/client';
 import { formatDate, formatDateTime } from '../../utils/helpers';
 import Avatar from '../../components/Avatar';
 import { Skeleton } from '../../components/Skeleton';
@@ -19,6 +19,9 @@ export default function ProfileScreen({ navigation }) {
   const [form, setForm] = useState({});
   const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [changingPw, setChangingPw] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deletePw, setDeletePw] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => { loadProfile(); }, []);
 
@@ -78,6 +81,33 @@ export default function ProfileScreen({ navigation }) {
       Alert.alert('Error', errors.join('\n'));
     } finally {
       setChangingPw(false);
+    }
+  }
+
+  function confirmDeleteAccount() {
+    if (!deletePw) { Alert.alert('Password required', 'Enter your password to confirm.'); return; }
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes your account, order history and personal data. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: handleDeleteAccount },
+      ],
+    );
+  }
+
+  async function handleDeleteAccount() {
+    setDeleting(true);
+    try {
+      await authAPI.deleteAccount(deletePw);
+      Alert.alert('Account deleted', 'Your account and personal data have been permanently deleted.', [
+        { text: 'OK', onPress: logout },
+      ]);
+    } catch (error) {
+      const errors = error.response?.data?.errors || ['Failed to delete account.'];
+      Alert.alert('Error', errors.join('\n'));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -179,6 +209,37 @@ export default function ProfileScreen({ navigation }) {
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
 
+      {/* Danger zone — delete account */}
+      <View style={styles.dangerZone}>
+        {!showDelete ? (
+          <TouchableOpacity style={styles.deleteLink} onPress={() => setShowDelete(true)}>
+            <Ionicons name="trash-outline" size={16} color="#9ca3af" />
+            <Text style={styles.deleteLinkText}>Delete my account</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.deleteBox}>
+            <Text style={styles.deleteTitle}>Delete account</Text>
+            <Text style={styles.deleteWarn}>This permanently deletes your account, order history and personal data. This cannot be undone. Enter your password to confirm.</Text>
+            <TextInput
+              style={styles.input}
+              value={deletePw}
+              onChangeText={setDeletePw}
+              secureTextEntry
+              placeholder="Your password"
+              placeholderTextColor="#9ca3af"
+            />
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <TouchableOpacity style={styles.deleteCancel} onPress={() => { setShowDelete(false); setDeletePw(''); }}>
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteConfirm} onPress={confirmDeleteAccount} disabled={deleting}>
+                {deleting ? <ActivityIndicator color="#fff" /> : <Text style={styles.deleteConfirmText}>Permanently Delete</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </View>
+
       <View style={{ height: 30 }} />
     </ScrollView>
   );
@@ -206,4 +267,14 @@ const styles = StyleSheet.create({
   menuText: { fontSize: 15, fontWeight: '600', color: '#212529' },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', margin: 16, padding: 14, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#dc3545', gap: 8 },
   logoutText: { color: '#dc3545', fontSize: 16, fontWeight: '600' },
+  dangerZone: { marginHorizontal: 16 },
+  deleteLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8 },
+  deleteLinkText: { color: '#9ca3af', fontSize: 14, fontWeight: '600' },
+  deleteBox: { backgroundColor: '#fff', borderRadius: 10, padding: 16, borderWidth: 1, borderColor: '#fecaca' },
+  deleteTitle: { fontSize: 16, fontWeight: '800', color: '#dc3545', marginBottom: 6 },
+  deleteWarn: { fontSize: 13, color: '#6b7280', lineHeight: 19, marginBottom: 12 },
+  deleteCancel: { flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', alignItems: 'center' },
+  deleteCancelText: { color: '#374151', fontWeight: '700', fontSize: 15 },
+  deleteConfirm: { flex: 1.4, paddingVertical: 12, borderRadius: 8, backgroundColor: '#dc3545', alignItems: 'center', justifyContent: 'center' },
+  deleteConfirmText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

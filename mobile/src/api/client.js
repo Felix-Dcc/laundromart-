@@ -155,6 +155,7 @@ export const authAPI = {
   getMe: () => api.get('/auth/me'),
   updateFcmToken: (fcmToken, platform) => api.put('/auth/fcm-token', { fcmToken, platform }),
   removeFcmToken: (fcmToken) => api.delete('/auth/fcm-token', { data: { fcmToken } }),
+  deleteAccount: (password) => api.post('/auth/delete-account', { password }),
 };
 
 // ========================

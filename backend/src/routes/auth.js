@@ -311,4 +311,31 @@ router.delete('/fcm-token', authenticate, async (req, res) => {
   }
 });
 
+// POST /api/auth/delete-account — permanently delete the signed-in user's own
+// account and personal data. Requires the account password (re-auth for a
+// destructive, irreversible action). Required for app-store compliance.
+router.post('/delete-account', authenticate, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ errors: ['Your password is required to delete your account.'] });
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) return res.status(404).json({ errors: ['Account not found.'] });
+    if (!(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ errors: ['Incorrect password.'] });
+    }
+    // Admins/super admins must be managed from the dashboard, not self-deleted here.
+    if (user.userType === 'admin' || user.userType === 'superadmin') {
+      return res.status(403).json({ errors: ['Administrator accounts cannot be deleted from the app.'] });
+    }
+
+    // Schema cascades remove the user's orders, transactions, tokens, reviews, etc.
+    await prisma.user.delete({ where: { id: user.id } });
+    res.json({ message: 'Your account and personal data have been permanently deleted.' });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(500).json({ errors: ['Failed to delete account. Please try again or contact support.'] });
+  }
+});
+
 module.exports = router;

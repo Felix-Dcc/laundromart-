@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, FlatList,
+  View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput, ScrollView,
   ActivityIndicator, Alert, Linking, Platform, Animated, Dimensions,
 } from 'react-native';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -121,6 +121,76 @@ const markerStyles = StyleSheet.create({
   },
 });
 
+// ── Grid clustering ──────────────────────────────────────────
+// Dependency-free: snap each provider to a grid cell whose size scales with the
+// current zoom (longitudeDelta). Cells with 2+ providers become a cluster bubble;
+// singletons render as normal pins. Zoomed in => tiny cells => everything splits
+// back into individual markers. Selected + favorite pins are never clustered so
+// they always stay visible/highlighted.
+const CLUSTER_GRID = 9; // ~9 cells across the visible span
+
+function clusterProviders(list, region, selectedId, favoriteIds) {
+  if (!region || !region.longitudeDelta) return { clusters: [], singles: list };
+  const cell = region.longitudeDelta / CLUSTER_GRID;
+  if (!(cell > 0)) return { clusters: [], singles: list };
+
+  const cells = new Map();
+  const singles = [];
+  for (const p of list) {
+    if (p.latitude == null || p.longitude == null) continue;
+    if (p.id === selectedId || favoriteIds.has(p.id)) { singles.push(p); continue; }
+    const key = `${Math.floor(p.latitude / cell)}_${Math.floor(p.longitude / cell)}`;
+    const bucket = cells.get(key);
+    if (bucket) bucket.push(p); else cells.set(key, [p]);
+  }
+
+  const clusters = [];
+  for (const group of cells.values()) {
+    if (group.length === 1) { singles.push(group[0]); continue; }
+    const lat = group.reduce((s, p) => s + p.latitude, 0) / group.length;
+    const lng = group.reduce((s, p) => s + p.longitude, 0) / group.length;
+    clusters.push({ id: `c_${group[0].id}_${group.length}`, latitude: lat, longitude: lng, count: group.length, points: group });
+  }
+  return { clusters, singles };
+}
+
+// A cluster bubble. tracksViewChanges is enabled briefly so the count renders,
+// then disabled to stop the marker from redrawing every frame (battery).
+function ClusterMarker({ cluster, onPress }) {
+  const [track, setTrack] = useState(true);
+  useEffect(() => {
+    setTrack(true);
+    const t = setTimeout(() => setTrack(false), 600);
+    return () => clearTimeout(t);
+  }, [cluster.count]);
+  const size = cluster.count >= 25 ? 56 : cluster.count >= 10 ? 50 : 44;
+  return (
+    <Marker
+      coordinate={{ latitude: cluster.latitude, longitude: cluster.longitude }}
+      onPress={onPress}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={track}
+      zIndex={800}
+    >
+      <View style={[clusterStyles.outer, { width: size, height: size, borderRadius: size / 2 }]}>
+        <View style={[clusterStyles.inner, { width: size - 12, height: size - 12, borderRadius: (size - 12) / 2 }]}>
+          <Text style={clusterStyles.count}>{cluster.count}</Text>
+        </View>
+      </View>
+    </Marker>
+  );
+}
+
+const clusterStyles = StyleSheet.create({
+  outer: { backgroundColor: 'rgba(59,130,246,0.25)', alignItems: 'center', justifyContent: 'center' },
+  inner: {
+    backgroundColor: '#3b82f6', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2.5, borderColor: '#fff',
+    shadowColor: '#3b82f6', shadowOpacity: 0.5, shadowRadius: 6, shadowOffset: { width: 0, height: 0 }, elevation: 6,
+  },
+  count: { color: '#fff', fontWeight: '800', fontSize: 14 },
+});
+
 export default function UserMapScreen({ navigation }) {
   const [viewMode, setViewMode] = useState('map');
   const [location, setLocation] = useState(null);
@@ -129,11 +199,22 @@ export default function UserMapScreen({ navigation }) {
   const [permDenied, setPermDenied] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState(null);
   const [radius, setRadius] = useState(20);
+  const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState({ openNow: false, verified: false, delivers: false, accepting: false });
+  const [sortBy, setSortBy] = useState('nearest'); // 'nearest' | 'rating'
+  const [region, setRegion] = useState(null);
   const mapRef = useRef(null);
   const { isFavorite, getCount, toggleFavorite, favoriteIds } = useFavorites();
 
   useEffect(() => { requestLocation(); }, []);
   useEffect(() => { if (location) fetchLaundromats(); }, [location, radius]);
+  // Seed the clustering region as soon as we have the user's location.
+  useEffect(() => {
+    if (location && !region) setRegion({ ...location, latitudeDelta: 0.08, longitudeDelta: 0.08 });
+  }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleFilter = useCallback((key) => setFilters((f) => ({ ...f, [key]: !f[key] })), []);
+  const anyFilterActive = filters.openNow || filters.verified || filters.delivers || filters.accepting;
 
   // Real-time laundromat updates
   useEffect(() => {
@@ -214,28 +295,49 @@ export default function UserMapScreen({ navigation }) {
     }
   }
 
-  const filteredProviders = useMemo(
-    () => providers.filter((p) => p.distanceKm == null || p.distanceKm <= radius),
-    [providers, radius],
-  );
+  // radius → search → filter chips → sort. Powers both map markers and list.
+  const visibleProviders = useMemo(() => {
+    let list = providers.filter((p) => p.distanceKm == null || p.distanceKm <= radius);
 
-  // Ordering: favorites first, then nearby, then everyone else (each by distance).
-  const orderedProviders = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (q) {
+      list = list.filter((p) =>
+        (p.businessName || '').toLowerCase().includes(q) ||
+        (p.address || '').toLowerCase().includes(q) ||
+        (p.services || []).some((s) => String(s).toLowerCase().includes(q)),
+      );
+    }
+    if (filters.openNow) list = list.filter((p) => isOpenNow(p.businessHours) !== false);
+    if (filters.verified) list = list.filter((p) => p.isVerified === true);
+    if (filters.delivers) list = list.filter((p) => p.deliveryAvailable === true);
+    if (filters.accepting) list = list.filter((p) => p.acceptingOrders !== false);
+
+    if (sortBy === 'rating') {
+      return [...list].sort((a, b) =>
+        (b.avgRating || 0) - (a.avgRating || 0) ||
+        (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
+    }
+    // 'nearest' — favorites first, then nearby, then the rest, each by distance.
     const rank = (p) => {
       if (favoriteIds.has(p.id)) return 0;
       if (p.distanceKm != null && p.distanceKm <= NEARBY_RADIUS_KM) return 1;
       return 2;
     };
-    return [...filteredProviders].sort((a, b) => {
+    return [...list].sort((a, b) => {
       const r = rank(a) - rank(b);
       if (r !== 0) return r;
       return (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9);
     });
-  }, [filteredProviders, favoriteIds]);
+  }, [providers, radius, query, filters, sortBy, favoriteIds]);
 
   const nearbyProviders = useMemo(
     () => providers.filter((p) => p.distanceKm != null && p.distanceKm <= NEARBY_RADIUS_KM),
     [providers],
+  );
+
+  const { clusters, singles } = useMemo(
+    () => clusterProviders(visibleProviders, region, selectedProvider?.id, favoriteIds),
+    [visibleProviders, region, selectedProvider, favoriteIds],
   );
 
   const handleMarkerPress = useCallback((provider) => {
@@ -264,17 +366,26 @@ export default function UserMapScreen({ navigation }) {
   }, [viewMode]);
 
   const fitAllMarkers = useCallback(() => {
-    if (!mapRef.current || !filteredProviders.length) return;
-    const coords = filteredProviders.map((p) => ({
-      latitude: p.latitude,
-      longitude: p.longitude,
-    }));
+    if (!mapRef.current || !visibleProviders.length) return;
+    const coords = visibleProviders
+      .filter((p) => p.latitude != null && p.longitude != null)
+      .map((p) => ({ latitude: p.latitude, longitude: p.longitude }));
     if (location) coords.push(location);
+    if (!coords.length) return;
     mapRef.current.fitToCoordinates(coords, {
       edgePadding: { top: 80, right: 60, bottom: 120, left: 60 },
       animated: true,
     });
-  }, [filteredProviders, location]);
+  }, [visibleProviders, location]);
+
+  // Tapping a cluster zooms to fit the providers inside it (splits it apart).
+  const zoomToCluster = useCallback((cluster) => {
+    if (!mapRef.current || !cluster.points.length) return;
+    mapRef.current.fitToCoordinates(
+      cluster.points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
+      { edgePadding: { top: 140, right: 80, bottom: 180, left: 80 }, animated: true },
+    );
+  }, []);
 
   const centerOnUser = useCallback(() => {
     if (!mapRef.current || !location) return;
@@ -337,6 +448,37 @@ export default function UserMapScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      {/* Search */}
+      <View style={styles.searchRow}>
+        <Ionicons name="search" size={17} color="#9ca3af" />
+        <TextInput
+          style={styles.searchInput}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search name, area or service"
+          placeholderTextColor="#9ca3af"
+          returnKeyType="search"
+          autoCorrect={false}
+        />
+        {query.length > 0 && (
+          <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="close-circle" size={18} color="#c4c9d2" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Filter chips */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        <FilterChip icon="swap-vertical" label={sortBy === 'rating' ? 'Top rated' : 'Nearest'} active onPress={() => setSortBy((s) => (s === 'rating' ? 'nearest' : 'rating'))} />
+        <FilterChip icon="time-outline" label="Open now" active={filters.openNow} onPress={() => toggleFilter('openNow')} />
+        <FilterChip icon="checkmark-circle" label="Verified" active={filters.verified} onPress={() => toggleFilter('verified')} />
+        <FilterChip icon="cube-outline" label="Delivers" active={filters.delivers} onPress={() => toggleFilter('delivers')} />
+        <FilterChip icon="basket-outline" label="Accepting" active={filters.accepting} onPress={() => toggleFilter('accepting')} />
+        {(anyFilterActive || query.length > 0) && (
+          <FilterChip icon="close" label="Clear" clear onPress={() => { setFilters({ openNow: false, verified: false, delivers: false, accepting: false }); setQuery(''); }} />
+        )}
+      </ScrollView>
+
       {/* Radius selector */}
       <View style={styles.radiusRow}>
         <Text style={styles.radiusLabel}>Radius:</Text>
@@ -356,7 +498,7 @@ export default function UserMapScreen({ navigation }) {
       {/* Stats bar */}
       <View style={styles.statsBar}>
         <Text style={styles.statsText}>
-          {filteredProviders.length} laundromat{filteredProviders.length !== 1 ? 's' : ''}
+          {visibleProviders.length} laundromat{visibleProviders.length !== 1 ? 's' : ''}
           {nearbyProviders.length > 0 && ` · ${nearbyProviders.length} nearby`}
         </Text>
         {viewMode === 'map' && (
@@ -394,6 +536,7 @@ export default function UserMapScreen({ navigation }) {
               zoomControlEnabled={Platform.OS === 'android'}
               rotateEnabled
               onMapReady={fitAllMarkers}
+              onRegionChangeComplete={setRegion}
             >
               {/* Nearby radius circle */}
               <Circle
@@ -404,7 +547,13 @@ export default function UserMapScreen({ navigation }) {
                 strokeWidth={1}
               />
 
-              {orderedProviders.map((provider) => {
+              {/* Cluster bubbles (2+ providers in a grid cell at this zoom) */}
+              {clusters.map((c) => (
+                <ClusterMarker key={c.id} cluster={c} onPress={() => zoomToCluster(c)} />
+              ))}
+
+              {/* Individual pins (singletons + selected + favorites) */}
+              {singles.map((provider) => {
                 const isNearby = provider.distanceKm != null && provider.distanceKm <= NEARBY_RADIUS_KM;
                 return (
                   <MemoizedMarker
@@ -449,7 +598,7 @@ export default function UserMapScreen({ navigation }) {
       ) : (
         /* List view */
         <FlatList
-          data={orderedProviders}
+          data={visibleProviders}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item, index }) => (
             <ProviderListCard
@@ -469,7 +618,11 @@ export default function UserMapScreen({ navigation }) {
             <EmptyState
               icon="storefront-outline"
               title="No laundromats found"
-              subtitle="Try increasing the search radius to find more laundromats."
+              subtitle={
+                query || anyFilterActive
+                  ? 'No matches for your search and filters. Try clearing them or widening the radius.'
+                  : 'Try increasing the search radius to find more laundromats.'
+              }
               tint="#3b82f6"
             />
           }
@@ -478,6 +631,21 @@ export default function UserMapScreen({ navigation }) {
         />
       )}
     </View>
+  );
+}
+
+function FilterChip({ icon, label, active, clear, onPress }) {
+  return (
+    <TouchableOpacity
+      style={[styles.filterChip, active && styles.filterChipActive, clear && styles.filterChipClear]}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <Ionicons name={icon} size={13} color={clear ? '#ef4444' : active ? '#fff' : '#6b7280'} />
+      <Text style={[styles.filterChipText, active && styles.filterChipTextActive, clear && styles.filterChipTextClear]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
@@ -771,6 +939,28 @@ const styles = StyleSheet.create({
   radiusChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
   radiusChipText: { fontSize: 12, color: '#6b7280', fontWeight: '600' },
   radiusChipTextActive: { color: '#fff' },
+
+  // Search
+  searchRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginHorizontal: 16, marginTop: 6, marginBottom: 2,
+    backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 12, paddingVertical: Platform.OS === 'ios' ? 10 : 4,
+    borderWidth: 1.5, borderColor: '#e5e7eb',
+  },
+  searchInput: { flex: 1, fontSize: 14, color: '#1f2937', padding: 0 },
+
+  // Filter chips
+  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 8 },
+  filterChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderWidth: 1.5, borderColor: '#e5e7eb', borderRadius: 20,
+    paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#fff',
+  },
+  filterChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
+  filterChipClear: { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
+  filterChipText: { fontSize: 12.5, color: '#6b7280', fontWeight: '600' },
+  filterChipTextActive: { color: '#fff' },
+  filterChipTextClear: { color: '#ef4444' },
 
   // Stats
   statsBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 },

@@ -36,6 +36,7 @@ export const sa = {
   providers: (search) => api.get('/superadmin/providers', { params: { search } }),
   createProvider: (body) => api.post('/superadmin/providers', body),
   patchProvider: (id, body) => api.patch(`/superadmin/providers/${id}`, body),
+  geocodeMissing: () => api.post('/superadmin/providers/geocode-missing'),
   riders: () => api.get('/superadmin/riders'),
   createRider: (body) => api.post('/superadmin/riders', body),
   patchRider: (id, body) => api.patch(`/superadmin/riders/${id}`, body),

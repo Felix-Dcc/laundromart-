@@ -178,6 +178,7 @@ router.get('/providers', async (req, res) => {
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true, address: true,
         businessName: true, businessHours: true, status: true, acceptingOrders: true,
+        latitude: true, longitude: true,
         providerApproved: true, isVerified: true, avgRating: true, reviewCount: true, createdAt: true,
         _count: { select: { providerOrders: true } },
       },
@@ -193,6 +194,7 @@ router.get('/providers', async (req, res) => {
         id: p.id, name: p.businessName || `${p.firstName} ${p.lastName}`,
         firstName: p.firstName, lastName: p.lastName, email: p.email, phone: p.phone, address: p.address,
         businessHours: p.businessHours, status: p.status, acceptingOrders: p.acceptingOrders,
+        latitude: p.latitude, longitude: p.longitude,
         approved: p.providerApproved, verified: p.isVerified,
         rating: p.avgRating, reviewCount: p.reviewCount, orders: p._count.providerOrders,
         earnings: num(rev._sum.amount), createdAt: p.createdAt,
@@ -289,7 +291,7 @@ router.post('/providers', async (req, res) => {
 // laundromats finally appear on the map. Idempotent: a provider that already
 // has lat/lng is skipped, so re-running never re-bills Google for the same row.
 // ============================================================
-router.post('/providers/geocode-missing', requireSuperAdmin, async (req, res) => {
+router.post('/providers/geocode-missing', async (req, res) => {
   try {
     const providers = await prisma.user.findMany({
       where: { userType: 'provider', OR: [{ latitude: null }, { longitude: null }] },

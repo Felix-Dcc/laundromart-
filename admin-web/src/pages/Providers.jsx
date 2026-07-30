@@ -13,6 +13,7 @@ export default function Providers() {
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState(null);
   const [create, setCreate] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
   const sel = useBulkSelect((rows || []).map((p) => p.id));
 
   const [params] = useSearchParams();
@@ -36,7 +37,22 @@ export default function Providers() {
     sel.clear(); await load();
   }
 
+  async function geocodeMissing() {
+    if (!(await confirm({ title: 'Locate providers with missing coordinates?', message: 'Geocodes every laundromat that has an address but no map location, so they appear in customer search. Safe to run repeatedly — already-located providers are skipped.', confirmLabel: 'Geocode' }))) return;
+    setGeocoding(true);
+    try {
+      const { data } = await sa.geocodeMissing();
+      if (data.updated) toast.success(`Located ${data.updated} laundromat${data.updated > 1 ? 's' : ''}${data.failed ? ` · ${data.failed} failed` : ''}`);
+      else if (data.total === 0) toast.success('All providers already have locations');
+      else toast.error(`Located none — ${data.failed} address${data.failed === 1 ? '' : 'es'} could not be resolved. Check the GOOGLE_MAPS_API_KEY on the backend.`);
+      await load();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Geocoding failed');
+    } finally { setGeocoding(false); }
+  }
+
   const pendingCount = (rows || []).filter((p) => !p.approved).length;
+  const missingLoc = (rows || []).filter((p) => p.latitude == null || p.longitude == null).length;
 
   return (
     <>
@@ -47,6 +63,9 @@ export default function Providers() {
           <Icon name="search" size={15} color="var(--text-3)" />
           <input placeholder="Search business / email" value={search} onChange={(e) => setSearch(e.target.value)} />
         </form>
+        <button className="btn" disabled={geocoding} onClick={geocodeMissing} title="Locate providers that have an address but no map coordinates">
+          <Icon name="map" size={15} /> {geocoding ? 'Geocoding…' : 'Geocode locations'}{missingLoc ? ` (${missingLoc})` : ''}
+        </button>
         <button className="btn" onClick={load}><Icon name="refresh" size={15} /> Refresh</button>
       </div>
 
@@ -66,7 +85,7 @@ export default function Providers() {
                       <div className="row">
                         <div className="avatar" style={{ width: 32, height: 32, fontSize: 12, borderRadius: 9 }}>{initials(p.name)}</div>
                         <div>
-                          <div className="row" style={{ gap: 6 }}><span style={{ fontWeight: 700 }}>{p.name}</span>{p.verified && <Icon name="verified" size={15} color="var(--brand)" fill="var(--brand-soft)" />}</div>
+                          <div className="row" style={{ gap: 6 }}><span style={{ fontWeight: 700 }}>{p.name}</span>{p.verified && <Icon name="verified" size={15} color="var(--brand)" fill="var(--brand-soft)" />}{(p.latitude == null || p.longitude == null) && <Badge text="No location" color="#f59e0b" />}</div>
                           <div className="muted" style={{ fontSize: 12 }}>{p.email}</div>
                         </div>
                       </div>
@@ -110,7 +129,7 @@ export default function Providers() {
 
 function CreateProvider({ onClose, onDone }) {
   const { toast } = useToast();
-  const [f, setF] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', businessName: '', businessHours: '7:00 AM – 9:00 PM', latitude: '', longitude: '' });
+  const [f, setF] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', businessName: '', address: '', businessHours: '7:00 AM – 9:00 PM', latitude: '', longitude: '' });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   async function save() {
@@ -129,11 +148,15 @@ function CreateProvider({ onClose, onDone }) {
         <div><label className="muted" style={{ fontSize: 12.5 }}>Phone</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.phone} onChange={set('phone')} /></div>
         <div><label className="muted" style={{ fontSize: 12.5 }}>Temporary password</label><input className="input" style={{ width: '100%', marginTop: 4 }} type="text" value={f.password} onChange={set('password')} placeholder="min 6 chars" /></div>
         <div><label className="muted" style={{ fontSize: 12.5 }}>Business hours</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.businessHours} onChange={set('businessHours')} placeholder="7:00 AM – 9:00 PM" /></div>
-        <div className="row" style={{ gap: 10 }}>
-          <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>Latitude</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.latitude} onChange={set('latitude')} placeholder="5.1121" /></div>
-          <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>Longitude</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.longitude} onChange={set('longitude')} placeholder="-1.2860" /></div>
-        </div>
-        <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}><Icon name="check" size={12} /> Created approved, verified and open. Add latitude &amp; longitude so it appears in customer search — without them the laundromat won't be discoverable.</div>
+        <div><label className="muted" style={{ fontSize: 12.5 }}>Business address</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.address} onChange={set('address')} placeholder="e.g. 12 Ring Rd, Accra" /><div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>Auto-located on the map from this address. Falls back to the business name if blank.</div></div>
+        <details>
+          <summary className="muted" style={{ fontSize: 12.5, cursor: 'pointer' }}>Set coordinates manually (optional)</summary>
+          <div className="row" style={{ gap: 10, marginTop: 8 }}>
+            <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>Latitude</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.latitude} onChange={set('latitude')} placeholder="5.1121" /></div>
+            <div style={{ flex: 1 }}><label className="muted" style={{ fontSize: 12.5 }}>Longitude</label><input className="input" style={{ width: '100%', marginTop: 4 }} value={f.longitude} onChange={set('longitude')} placeholder="-1.2860" /></div>
+          </div>
+        </details>
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}><Icon name="check" size={12} /> Created approved, verified and open. The address is geocoded automatically so it appears in customer search — or set coordinates manually above to override.</div>
       </div>
     </Modal>
   );

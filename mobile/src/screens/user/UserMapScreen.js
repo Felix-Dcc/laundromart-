@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput, ScrollView,
-  ActivityIndicator, Alert, Linking, Platform, Animated, Dimensions,
+  ActivityIndicator, Alert, Linking, Platform, Animated, Dimensions, Modal,
 } from 'react-native';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -213,8 +213,19 @@ export default function UserMapScreen({ navigation }) {
     if (location && !region) setRegion({ ...location, latitudeDelta: 0.08, longitudeDelta: 0.08 });
   }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [sheetOpen, setSheetOpen] = useState(false);
   const toggleFilter = useCallback((key) => setFilters((f) => ({ ...f, [key]: !f[key] })), []);
+  const toggleSort = useCallback(() => setSortBy((s) => (s === 'rating' ? 'nearest' : 'rating')), []);
   const anyFilterActive = filters.openNow || filters.verified || filters.delivers || filters.accepting;
+  const activeFilterCount =
+    (filters.openNow ? 1 : 0) + (filters.verified ? 1 : 0) +
+    (filters.delivers ? 1 : 0) + (filters.accepting ? 1 : 0) +
+    (sortBy === 'rating' ? 1 : 0);
+  const clearAll = useCallback(() => {
+    setFilters({ openNow: false, verified: false, delivers: false, accepting: false });
+    setSortBy('nearest');
+    setQuery('');
+  }, []);
 
   // Real-time laundromat updates
   useEffect(() => {
@@ -467,15 +478,16 @@ export default function UserMapScreen({ navigation }) {
         )}
       </View>
 
-      {/* Filter chips */}
+      {/* Filter chips — compact, horizontally scrollable (Hubtels style) */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-        <FilterChip icon="swap-vertical" label={sortBy === 'rating' ? 'Top rated' : 'Nearest'} active onPress={() => setSortBy((s) => (s === 'rating' ? 'nearest' : 'rating'))} />
+        <FilterChip icon="options-outline" label="Filters" active={activeFilterCount > 0} badge={activeFilterCount || null} onPress={() => setSheetOpen(true)} />
+        <FilterChip icon="swap-vertical-outline" label={sortBy === 'rating' ? 'Top rated' : 'Nearest'} chevron onPress={toggleSort} />
         <FilterChip icon="time-outline" label="Open now" active={filters.openNow} onPress={() => toggleFilter('openNow')} />
-        <FilterChip icon="checkmark-circle" label="Verified" active={filters.verified} onPress={() => toggleFilter('verified')} />
+        <FilterChip icon="shield-checkmark-outline" label="Verified" active={filters.verified} onPress={() => toggleFilter('verified')} />
         <FilterChip icon="cube-outline" label="Delivers" active={filters.delivers} onPress={() => toggleFilter('delivers')} />
-        <FilterChip icon="basket-outline" label="Accepting" active={filters.accepting} onPress={() => toggleFilter('accepting')} />
+        <FilterChip icon="storefront-outline" label="Accepting" active={filters.accepting} onPress={() => toggleFilter('accepting')} />
         {(anyFilterActive || query.length > 0) && (
-          <FilterChip icon="close" label="Clear" clear onPress={() => { setFilters({ openNow: false, verified: false, delivers: false, accepting: false }); setQuery(''); }} />
+          <FilterChip icon="close" label="Clear" clear onPress={clearAll} />
         )}
       </ScrollView>
 
@@ -630,22 +642,78 @@ export default function UserMapScreen({ navigation }) {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      <FilterSheet
+        visible={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        filters={filters}
+        toggleFilter={toggleFilter}
+        sortBy={sortBy}
+        toggleSort={toggleSort}
+        count={activeFilterCount}
+        onClear={clearAll}
+      />
     </View>
   );
 }
 
-function FilterChip({ icon, label, active, clear, onPress }) {
+function FilterChip({ icon, label, active, clear, chevron, badge, onPress }) {
+  const tint = clear ? '#ef4444' : active ? '#fff' : '#6B7280';
   return (
     <TouchableOpacity
       style={[styles.filterChip, active && styles.filterChipActive, clear && styles.filterChipClear]}
       onPress={onPress}
-      activeOpacity={0.8}
+      activeOpacity={0.85}
     >
-      <Ionicons name={icon} size={13} color={clear ? '#ef4444' : active ? '#fff' : '#6b7280'} />
+      {icon && <Ionicons name={icon} size={16} color={tint} />}
       <Text style={[styles.filterChipText, active && styles.filterChipTextActive, clear && styles.filterChipTextClear]}>
         {label}
       </Text>
+      {badge != null && (
+        <View style={[styles.chipBadge, active && styles.chipBadgeActive]}>
+          <Text style={styles.chipBadgeText}>{badge}</Text>
+        </View>
+      )}
+      {chevron && <Ionicons name="chevron-down" size={14} color={tint} />}
     </TouchableOpacity>
+  );
+}
+
+// Modern compact bottom sheet — same functional filters, wrap-friendly grid.
+function FilterSheet({ visible, onClose, filters, toggleFilter, sortBy, toggleSort, count, onClear }) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={onClose} />
+      <View style={styles.filterSheet}>
+        <View style={styles.sheetHandle} />
+        <View style={styles.sheetHeaderRow}>
+          <Text style={styles.sheetTitle}>Filter by</Text>
+          <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="close" size={22} color="#6B7280" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.sheetChipsWrap}>
+          <FilterChip icon="swap-vertical-outline" label={sortBy === 'rating' ? 'Top rated' : 'Nearest'} chevron onPress={toggleSort} />
+          <FilterChip icon="time-outline" label="Open now" active={filters.openNow} onPress={() => toggleFilter('openNow')} />
+          <FilterChip icon="shield-checkmark-outline" label="Verified" active={filters.verified} onPress={() => toggleFilter('verified')} />
+          <FilterChip icon="cube-outline" label="Delivers" active={filters.delivers} onPress={() => toggleFilter('delivers')} />
+          <FilterChip icon="storefront-outline" label="Accepting" active={filters.accepting} onPress={() => toggleFilter('accepting')} />
+        </View>
+
+        <TouchableOpacity style={styles.applyBtn} onPress={onClose} activeOpacity={0.9}>
+          <Text style={styles.applyBtnText}>Apply filters</Text>
+          {count > 0 && (
+            <View style={styles.applyBadge}><Text style={styles.applyBadgeText}>{count}</Text></View>
+          )}
+        </TouchableOpacity>
+        {count > 0 && (
+          <TouchableOpacity style={styles.sheetClearBtn} onPress={onClear}>
+            <Text style={styles.sheetClearText}>Clear all</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </Modal>
   );
 }
 
@@ -935,9 +1003,9 @@ const styles = StyleSheet.create({
   // Radius
   radiusRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 6, gap: 8 },
   radiusLabel: { fontSize: 13, fontWeight: '600', color: '#6b7280' },
-  radiusChip: { borderWidth: 1.5, borderColor: '#e5e7eb', borderRadius: 20, paddingVertical: 4, paddingHorizontal: 12, backgroundColor: '#fff' },
-  radiusChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
-  radiusChipText: { fontSize: 12, color: '#6b7280', fontWeight: '600' },
+  radiusChip: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 16, paddingVertical: 5, paddingHorizontal: 12, backgroundColor: '#F5F7FA' },
+  radiusChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
+  radiusChipText: { fontSize: 12, color: '#374151', fontWeight: '600' },
   radiusChipTextActive: { color: '#fff' },
 
   // Search
@@ -949,18 +1017,39 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 14, color: '#1f2937', padding: 0 },
 
-  // Filter chips
-  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 8 },
+  // Filter chips — Hubtels spec: compact pills, subtle bg, blue active
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 16, paddingVertical: 8 },
   filterChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    borderWidth: 1.5, borderColor: '#e5e7eb', borderRadius: 20,
-    paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#fff',
+    flexDirection: 'row', alignItems: 'center', gap: 6, height: 38,
+    borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 20,
+    paddingHorizontal: 14, backgroundColor: '#F5F7FA',
   },
-  filterChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
-  filterChipClear: { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
-  filterChipText: { fontSize: 12.5, color: '#6b7280', fontWeight: '600' },
-  filterChipTextActive: { color: '#fff' },
+  filterChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
+  filterChipClear: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
+  filterChipText: { fontSize: 13.5, color: '#374151', fontWeight: '600' },
+  filterChipTextActive: { color: '#FFFFFF' },
   filterChipTextClear: { color: '#ef4444' },
+  chipBadge: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, backgroundColor: '#2563EB', alignItems: 'center', justifyContent: 'center' },
+  chipBadgeActive: { backgroundColor: 'rgba(255,255,255,0.28)' },
+  chipBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+
+  // Filter bottom sheet
+  sheetBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)' },
+  filterSheet: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32,
+  },
+  sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: '#E5E7EB', marginBottom: 14 },
+  sheetHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
+  sheetTitle: { fontSize: 20, fontWeight: '800', color: '#111827' },
+  sheetChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 22 },
+  applyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#2563EB', borderRadius: 14, paddingVertical: 15 },
+  applyBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  applyBadge: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: 'rgba(255,255,255,0.28)', alignItems: 'center', justifyContent: 'center' },
+  applyBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  sheetClearBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+  sheetClearText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
 
   // Stats
   statsBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 },

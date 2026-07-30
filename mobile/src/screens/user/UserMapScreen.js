@@ -516,7 +516,15 @@ function SelectedProviderCard({ provider, isFavorite, favoriteCount, onToggleFav
           <AvatarComp name={provider.businessName} uri={providerLogo(provider.id)} size={48} style={{ borderRadius: 16 }} />
 
           <View style={{ flex: 1, paddingRight: 56 }}>
-            <Text style={styles.sheetName} numberOfLines={1}>{provider.businessName}</Text>
+            <View style={styles.nameVerifiedRow}>
+              <Text style={[styles.sheetName, { flexShrink: 1 }]} numberOfLines={1}>{provider.businessName}</Text>
+              {provider.isVerified && (
+                <View style={styles.verifiedBadge}>
+                  <Ionicons name="checkmark-circle" size={13} color="#38bdf8" />
+                  <Text style={styles.verifiedText}>Verified</Text>
+                </View>
+              )}
+            </View>
             <StarRating rating={provider.avgRating || 0} size={13} showLabel count={provider.reviewCount} />
             {favoriteCount > 0 && (
               <View style={styles.favCountRow}>
@@ -556,6 +564,12 @@ function SelectedProviderCard({ provider, isFavorite, favoriteCount, onToggleFav
             <Ionicons name="time-outline" size={13} color={colors.text.tertiary} />
             <Text style={styles.sheetChipText}>{provider.businessHours}</Text>
           </View>
+          {provider.deliveryAvailable === true && (
+            <View style={styles.sheetChip}>
+              <Ionicons name="cube-outline" size={13} color="#34d399" />
+              <Text style={[styles.sheetChipText, { color: '#6ee7b7' }]}>Delivers to you</Text>
+            </View>
+          )}
         </View>
 
         {/* Services */}
@@ -659,6 +673,9 @@ function ProviderListCard({ item, index, isNearby, isFav, onToggleFavorite, onPr
             <View style={{ flex: 1 }}>
               <View style={styles.nameRow}>
                 <Text style={styles.businessName} numberOfLines={1}>{item.businessName}</Text>
+                {item.isVerified && (
+                  <Ionicons name="checkmark-circle" size={14} color="#0ea5e9" />
+                )}
                 {isNearby && (
                   <View style={styles.nearbyBadge}>
                     <Text style={styles.nearbyBadgeText}>Nearby</Text>
@@ -696,6 +713,12 @@ function ProviderListCard({ item, index, isNearby, isFav, onToggleFavorite, onPr
             <Ionicons name="time-outline" size={14} color="#10b981" />
             <Text style={styles.chipText}>{item.businessHours}</Text>
           </View>
+          {item.deliveryAvailable === true && (
+            <View style={styles.infoChip}>
+              <Ionicons name="cube-outline" size={14} color="#059669" />
+              <Text style={[styles.chipText, { color: '#047857', fontWeight: '600' }]}>Delivers to you</Text>
+            </View>
+          )}
         </View>
         {item.services && item.services.length > 0 && (
           <View style={styles.chipRow}>
@@ -796,6 +819,9 @@ const styles = StyleSheet.create({
   },
   avatarInitial: { color: '#7cc8ff', fontSize: 10, fontWeight: '800' },
   sheetName: { fontSize: 18, fontWeight: '800', color: colors.text.primary, marginBottom: 2 },
+  nameVerifiedRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  verifiedBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(56,189,248,0.14)', borderRadius: 7, paddingHorizontal: 6, paddingVertical: 2 },
+  verifiedText: { fontSize: 10, fontWeight: '700', color: '#7dd3fc' },
 
   sheetInfo: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 14 },
   sheetChip: { flexDirection: 'row', alignItems: 'center', gap: 5 },

@@ -68,6 +68,12 @@ module.exports = {
     stripeSecret: process.env.STRIPE_SECRET_KEY || '',
     currency: process.env.PAYMENT_CURRENCY || 'GHS',
   },
+  maps: {
+    // Server-side Google Maps key (Geocoding API must be enabled; restrict by
+    // IP, not Android app, since this is called from the backend). Empty =>
+    // geocoding is skipped gracefully and providers keep any manual coordinates.
+    googleKey: process.env.GOOGLE_MAPS_API_KEY || '',
+  },
   security: {
     corsOrigins, // [] => allow all (dev)
     trustProxy: process.env.TRUST_PROXY === 'true', // true when behind Nginx/load balancer

@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { authenticate, requireAdmin, requireSuperAdmin } = require('../middleware/auth');
 const { logAuditEvent } = require('../services/audit');
 const { sendNotification } = require('../services/notification');
+const { geocodeAddress } = require('../services/geocoding');
 const { ORDER_INCLUDE, shapeOrder } = require('../lib/orderShape');
 
 const router = express.Router();
@@ -208,7 +209,7 @@ router.get('/providers', async (req, res) => {
 // approved, verified and open, so it's immediately bookable by customers).
 router.post('/providers', async (req, res) => {
   try {
-    const { firstName, lastName, email, phone, password, businessName, businessHours, latitude, longitude } = req.body;
+    const { firstName, lastName, email, phone, password, businessName, businessHours, latitude, longitude, address, deliveryRadius } = req.body;
     if (!firstName || !lastName || !email || !password || !businessName) {
       return res.status(400).json({ error: 'First name, last name, email, password and business name are required.' });
     }
@@ -219,8 +220,31 @@ router.post('/providers', async (req, res) => {
 
     // A parseable "H:MM AM – H:MM PM" range keeps the open/closed gate working.
     const hours = (businessHours && String(businessHours).trim()) || '7:00 AM – 9:00 PM';
-    const lat = latitude != null && latitude !== '' ? parseFloat(latitude) : null;
-    const lng = longitude != null && longitude !== '' ? parseFloat(longitude) : null;
+    // Real, human-entered street address (falls back to the business name so the
+    // record is never empty). This is what we geocode.
+    const realAddress = (address && String(address).trim()) || String(businessName).trim();
+    let lat = latitude != null && latitude !== '' ? parseFloat(latitude) : null;
+    let lng = longitude != null && longitude !== '' ? parseFloat(longitude) : null;
+    let placeId = null;
+    let formattedAddress = null;
+
+    // Geocode ONCE when the admin didn't type coordinates — this is what makes an
+    // address-only provider actually appear on the map. If it fails (no key /
+    // bad address) we still create the provider; they just won't be on the map
+    // until geocoded via the backfill endpoint or an edit.
+    if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) {
+      const geo = await geocodeAddress(realAddress);
+      if (geo) {
+        lat = geo.latitude;
+        lng = geo.longitude;
+        placeId = geo.placeId;
+        formattedAddress = geo.formattedAddress;
+      } else {
+        lat = null; lng = null;
+      }
+    }
+
+    const radius = deliveryRadius != null && deliveryRadius !== '' ? Math.max(1, parseFloat(deliveryRadius)) : undefined;
 
     const created = await prisma.user.create({
       data: {
@@ -228,13 +252,16 @@ router.post('/providers', async (req, res) => {
         lastName: String(lastName).trim(),
         email: cleanEmail,
         phone: (phone ? String(phone) : '0000000000').trim(),
-        address: String(businessName).trim(),
+        address: realAddress,
         password: await bcrypt.hash(String(password), 10),
         userType: 'provider',
         businessName: String(businessName).trim(),
         businessHours: hours,
         latitude: lat,
         longitude: lng,
+        placeId,
+        formattedAddress,
+        ...(radius != null && !isNaN(radius) ? { deliveryRadius: radius } : {}),
         status: 'active',
         acceptingOrders: true,   // open for orders
         providerApproved: true,  // admin-onboarded → approved
@@ -256,6 +283,52 @@ router.post('/providers', async (req, res) => {
   }
 });
 
+// ============================================================
+// POST /providers/geocode-missing — one-time backfill.
+// Geocodes every provider that has an address but no coordinates, so existing
+// laundromats finally appear on the map. Idempotent: a provider that already
+// has lat/lng is skipped, so re-running never re-bills Google for the same row.
+// ============================================================
+router.post('/providers/geocode-missing', requireSuperAdmin, async (req, res) => {
+  try {
+    const providers = await prisma.user.findMany({
+      where: { userType: 'provider', OR: [{ latitude: null }, { longitude: null }] },
+      select: { id: true, address: true, businessName: true, formattedAddress: true },
+    });
+
+    let updated = 0, failed = 0, skipped = 0;
+    for (const p of providers) {
+      const addr = (p.address && p.address.trim()) || p.businessName;
+      if (!addr) { skipped++; continue; }
+      const geo = await geocodeAddress(addr);
+      if (!geo) { failed++; continue; }
+      await prisma.user.update({
+        where: { id: p.id },
+        data: {
+          latitude: geo.latitude,
+          longitude: geo.longitude,
+          placeId: geo.placeId,
+          formattedAddress: geo.formattedAddress,
+        },
+      });
+      updated++;
+      await new Promise((r) => setTimeout(r, 120)); // gentle rate-limit vs. Google
+    }
+
+    const { cacheDel, KEYS } = require('../lib/cache');
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    await logAuditEvent({
+      userId: req.user.id, actionType: 'PROVIDERS_GEOCODED', entityType: 'user', entityId: null,
+      description: `${req.user.firstName} ran geocode backfill: ${updated} located, ${failed} failed, ${skipped} skipped`,
+      ipAddress: req.ip, userAgent: req.get?.('user-agent'),
+    });
+    res.json({ total: providers.length, updated, failed, skipped });
+  } catch (error) {
+    console.error('Geocode backfill error:', error);
+    res.status(500).json({ error: 'Failed to geocode providers.' });
+  }
+});
+
 router.patch('/providers/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -267,6 +340,26 @@ router.patch('/providers/:id', async (req, res) => {
     if (typeof req.body.verified === 'boolean') data.isVerified = req.body.verified;
     if (req.body.status === 'active' || req.body.status === 'inactive') data.status = req.body.status;
     if (req.body.businessHours) data.businessHours = String(req.body.businessHours).trim();
+    if (req.body.deliveryRadius != null && req.body.deliveryRadius !== '') {
+      const r = Math.max(1, parseFloat(req.body.deliveryRadius));
+      if (!isNaN(r)) data.deliveryRadius = r;
+    }
+    // Address edit → re-geocode (address genuinely changed, so a fresh lookup is
+    // correct, not wasteful). Explicit lat/lng in the body still win over this.
+    if (req.body.address && String(req.body.address).trim() && String(req.body.address).trim() !== p.address) {
+      data.address = String(req.body.address).trim();
+      const geo = await geocodeAddress(data.address);
+      if (geo) {
+        data.latitude = geo.latitude;
+        data.longitude = geo.longitude;
+        data.placeId = geo.placeId;
+        data.formattedAddress = geo.formattedAddress;
+      }
+    }
+    if (req.body.latitude != null && req.body.latitude !== '' && req.body.longitude != null && req.body.longitude !== '') {
+      const la = parseFloat(req.body.latitude), lo = parseFloat(req.body.longitude);
+      if (!isNaN(la) && !isNaN(lo)) { data.latitude = la; data.longitude = lo; }
+    }
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'No valid fields.' });
 
     const updated = await prisma.user.update({ where: { id }, data });

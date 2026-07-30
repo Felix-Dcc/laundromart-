@@ -19,10 +19,21 @@ const PROVIDER_FIELDS = {
   businessName: true,
   businessHours: true,
   acceptingOrders: true,
+  isVerified: true,
+  deliveryRadius: true,
+  formattedAddress: true,
+  placeId: true,
   avgRating: true,
   reviewCount: true,
   _count: { select: { favoritedBy: true } },
 };
+
+// Provider delivers to the customer when the customer sits inside the provider's
+// delivery radius. null when we can't tell (no user location or no radius set).
+function deliversTo(distanceKm, radius) {
+  if (distanceKm == null || radius == null) return null;
+  return distanceKm <= radius;
+}
 
 // Attach open/accepting/available flags so clients can gate the Select button.
 function withAvailability(p, businessHours) {
@@ -110,10 +121,13 @@ router.get('/all', authenticate, async (req, res) => {
         ownerName: `${p.firstName} ${p.lastName}`,
         email: p.email,
         phone: p.phone,
-        address: p.address,
+        address: p.formattedAddress || p.address,
         latitude: p.latitude,
         longitude: p.longitude,
         businessHours,
+        isVerified: p.isVerified === true,
+        deliveryRadius: p.deliveryRadius ?? null,
+        deliveryAvailable: deliversTo(distanceKm, p.deliveryRadius),
         avgRating: p.avgRating || 0,
         reviewCount: p.reviewCount || 0,
         favoriteCount: p._count ? p._count.favoritedBy : 0,
@@ -171,10 +185,13 @@ router.get('/', authenticate, async (req, res) => {
           ownerName: `${p.firstName} ${p.lastName}`,
           email: p.email,
           phone: p.phone,
-          address: p.address,
+          address: p.formattedAddress || p.address,
           latitude: p.latitude,
           longitude: p.longitude,
           businessHours,
+          isVerified: p.isVerified === true,
+          deliveryRadius: p.deliveryRadius ?? null,
+          deliveryAvailable: deliversTo(Math.round(distanceKm * 100) / 100, p.deliveryRadius),
           avgRating: p.avgRating || 0,
           reviewCount: p.reviewCount || 0,
           favoriteCount: p._count ? p._count.favoritedBy : 0,

@@ -93,6 +93,9 @@ model User {
   longitude         Float?
   businessName      String?    @map("business_name") @db.VarChar(150)
   businessHours     String?    @map("business_hours") @db.VarChar(100)
+  placeId           String?    @map("place_id") @db.VarChar(255)      // Google Place ID (set once at geocode time; re-geocode guard)
+  formattedAddress  String?    @map("formatted_address") @db.Text     // canonical address returned by Google Geocoding
+  deliveryRadius    Float?     @default(10) @map("delivery_radius")    // km — provider delivers within this radius
   acceptingOrders   Boolean    @default(true) @map("accepting_orders") // provider toggle: pause new orders
   providerApproved  Boolean    @default(true) @map("provider_approved") // admin approval gate (provider)
   isVerified        Boolean    @default(false) @map("is_verified")      // admin-set "verified" badge (provider)

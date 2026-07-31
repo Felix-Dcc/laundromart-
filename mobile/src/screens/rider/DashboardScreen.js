@@ -229,7 +229,7 @@ export default function RiderDashboardScreen({ navigation }) {
           <View style={styles.heroStatDivider} />
           <View style={styles.heroStat}>
             <Ionicons name="cash-outline" size={18} color="rgba(255,255,255,0.8)" />
-            <Text style={styles.heroStatNum}>${parseFloat(rider?.totalEarnings || 0).toFixed(0)}</Text>
+            <Text style={styles.heroStatNum}>GH₵{parseFloat(rider?.totalEarnings || 0).toFixed(0)}</Text>
             <Text style={styles.heroStatLabel}>Earnings</Text>
           </View>
           <View style={styles.heroStatDivider} />

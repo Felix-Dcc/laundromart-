@@ -66,6 +66,21 @@ enum PricingStatus {
   inactive
 }
 
+// How a provider charges for one of their own services.
+enum PricingType {
+  per_kg
+  fixed
+  per_item
+}
+
+// Provider-controlled availability. Only `available` services are bookable.
+enum ServiceStatus {
+  available
+  unavailable
+  temporarily_closed
+  out_of_service
+}
+
 enum NotificationType {
   info
   success
@@ -132,6 +147,7 @@ model User {
   riderAssignments RiderAssignment[]
   favorites        Favorite[]             @relation("UserFavorites")
   favoritedBy      Favorite[]             @relation("ProviderFavoritedBy")
+  services         LaundryService[]       @relation("ProviderServices")
   transactions     Transaction[]
   refreshTokens    RefreshToken[]
   deviceTokens     DeviceToken[]
@@ -155,6 +171,38 @@ model LaundryPricing {
   updatedAt   DateTime      @updatedAt @map("updated_at")
 
   @@map("laundry_pricing")
+}
+
+// A service owned and priced by ONE provider. Additive: the platform-wide
+// `LaundryPricing` list above is untouched and still serves as the fallback for
+// providers who haven't defined their own services yet, so existing orders and
+// the current customer flow keep working unchanged.
+model LaundryService {
+  id                       Int           @id @default(autoincrement())
+  providerId               Int           @map("provider_id")
+  name                     String        @db.VarChar(120)
+  description              String?       @db.Text
+  category                 String        @default("Custom Service") @db.VarChar(80)
+  pricingType              PricingType   @default(per_kg) @map("pricing_type")
+  // Only the column matching pricingType is populated; the others stay null.
+  pricePerKg               Decimal?      @map("price_per_kg") @db.Decimal(10, 2)
+  fixedPrice               Decimal?      @map("fixed_price") @db.Decimal(10, 2)
+  pricePerItem             Decimal?      @map("price_per_item") @db.Decimal(10, 2)
+  estimatedCompletionHours Int?          @map("estimated_completion_hours")
+  status                   ServiceStatus @default(available)
+  coverImage               String?       @map("cover_image") @db.Text // set in the images phase
+  // Soft delete: historical orders reference services by name, so removing a
+  // service must only stop future bookings — never rewrite order history. Also
+  // lets a super admin restore one.
+  deletedAt                DateTime?     @map("deleted_at")
+  createdAt                DateTime      @default(now()) @map("created_at")
+  updatedAt                DateTime      @updatedAt @map("updated_at")
+
+  provider User @relation("ProviderServices", fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@index([providerId, status])
+  @@map("laundry_services")
 }
 
 model LaundryRequest {

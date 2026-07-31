@@ -212,6 +212,12 @@ export const providerAPI = {
   // Pause/resume accepting new orders
   getAcceptingOrders: () => api.get('/provider/accepting-orders'),
   setAcceptingOrders: (acceptingOrders) => api.put('/provider/accepting-orders', { acceptingOrders }),
+  // ── Services the provider owns and prices themselves ──
+  getServiceCategories: () => api.get('/provider/service-categories'),
+  getServices: () => api.get('/provider/services'),
+  createService: (body) => api.post('/provider/services', body),
+  updateService: (id, body) => api.patch(`/provider/services/${id}`, body),
+  deleteService: (id) => api.delete(`/provider/services/${id}`),
 };
 
 // ========================

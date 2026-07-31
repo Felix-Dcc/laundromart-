@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ProviderDashboard from '../screens/provider/DashboardScreen';
 import OrderQueueScreen from '../screens/provider/OrderQueueScreen';
 import ProviderOrderDetailsScreen from '../screens/provider/OrderDetailsScreen';
+import ServicesScreen from '../screens/provider/ServicesScreen';
 import AnalyticsScreen from '../screens/common/AnalyticsScreen';
 import NotificationsScreen from '../screens/common/NotificationsScreen';
 import NotificationSettingsScreen from '../screens/common/NotificationSettingsScreen';
@@ -43,6 +44,15 @@ function AnalyticsStack() {
   );
 }
 
+// Business — where a provider manages what they sell and for how much.
+function BusinessStack() {
+  return (
+    <Stack.Navigator screenOptions={headerGreen}>
+      <Stack.Screen name="ServicesHome" component={ServicesScreen} options={{ title: 'My Services' }} />
+    </Stack.Navigator>
+  );
+}
+
 function ProfileStack() {
   return (
     <Stack.Navigator screenOptions={headerGreen}>
@@ -62,6 +72,7 @@ export default function ProviderNavigator() {
           let iconName;
           if (route.name === 'Home') iconName = 'home-outline';
           else if (route.name === 'Orders') iconName = 'layers-outline';
+          else if (route.name === 'Business') iconName = 'pricetags-outline';
           else if (route.name === 'Stats') iconName = 'bar-chart-outline';
           else if (route.name === 'Profile') iconName = 'person-outline';
           return <Ionicons name={iconName} size={size} color={color} />;
@@ -70,6 +81,7 @@ export default function ProviderNavigator() {
     >
       <Tab.Screen name="Home" component={HomeStack} />
       <Tab.Screen name="Orders" component={QueueStack} />
+      <Tab.Screen name="Business" component={BusinessStack} />
       <Tab.Screen name="Stats" component={AnalyticsStack} />
       <Tab.Screen name="Profile" component={ProfileStack} />
     </Tab.Navigator>

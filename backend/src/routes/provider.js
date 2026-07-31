@@ -4,6 +4,7 @@ const { authenticate, requireProviderOrAdmin } = require('../middleware/auth');
 const { transitionOrder, verifyWeight, TransitionError } = require('../services/orderService');
 const sm = require('../services/orderStateMachine');
 const { ORDER_INCLUDE, shapeOrder } = require('../lib/orderShape');
+const { cacheDel, KEYS } = require('../lib/cache');
 
 const router = express.Router();
 const prisma = require('../lib/prisma');
@@ -258,6 +259,192 @@ router.put('/accepting-orders', async (req, res) => {
   } catch (error) {
     console.error('Set accepting-orders error:', error);
     res.status(500).json({ error: 'Failed to update setting.' });
+  }
+});
+
+// ============================================================
+// SERVICES — a provider owns, prices and publishes their own.
+// Every query is scoped to req.user.id, so a provider can only ever read or
+// mutate their own rows. Soft-deleted rows are excluded everywhere.
+// ============================================================
+const SERVICE_CATEGORIES = [
+  'Wash & Fold', 'Dry Cleaning', 'Ironing', 'Express Wash', 'Blanket Cleaning',
+  'Curtain Cleaning', 'Carpet Cleaning', 'Shoe Cleaning', 'Bag Cleaning',
+  'Wedding Dress Cleaning', 'Corporate Laundry', 'Custom Service',
+];
+const PRICING_TYPES = ['per_kg', 'fixed', 'per_item'];
+const SERVICE_STATUSES = ['available', 'unavailable', 'temporarily_closed', 'out_of_service'];
+
+const dec = (v) => (v == null ? null : Number(v));
+
+function shapeService(s) {
+  const price = s.pricingType === 'per_kg' ? dec(s.pricePerKg)
+    : s.pricingType === 'fixed' ? dec(s.fixedPrice)
+      : dec(s.pricePerItem);
+  const unit = s.pricingType === 'per_kg' ? '/kg' : s.pricingType === 'per_item' ? ' each' : '';
+  return {
+    id: s.id,
+    name: s.name,
+    description: s.description,
+    category: s.category,
+    pricingType: s.pricingType,
+    pricePerKg: dec(s.pricePerKg),
+    fixedPrice: dec(s.fixedPrice),
+    pricePerItem: dec(s.pricePerItem),
+    price,                       // the one that applies, for easy display
+    priceUnit: unit,
+    estimatedCompletionHours: s.estimatedCompletionHours,
+    status: s.status,
+    isAvailable: s.status === 'available',
+    coverImage: s.coverImage,
+    orderCount: 0, // overwritten by the list endpoint, which counts per name
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  };
+}
+
+// Validate + normalise a create/update payload. Returns { data } or { error }.
+function buildServiceData(body, { partial = false } = {}) {
+  const data = {};
+
+  if (body.name !== undefined || !partial) {
+    const name = String(body.name || '').trim();
+    if (!name) return { error: 'Service name is required.' };
+    if (name.length > 120) return { error: 'Service name is too long (max 120).' };
+    data.name = name;
+  }
+  if (body.description !== undefined) {
+    data.description = body.description ? String(body.description).trim() : null;
+  }
+  if (body.category !== undefined || !partial) {
+    const cat = String(body.category || 'Custom Service').trim();
+    data.category = SERVICE_CATEGORIES.includes(cat) ? cat : 'Custom Service';
+  }
+  if (body.status !== undefined) {
+    if (!SERVICE_STATUSES.includes(body.status)) return { error: 'Invalid status.' };
+    data.status = body.status;
+  }
+  if (body.estimatedCompletionHours !== undefined) {
+    if (body.estimatedCompletionHours === null || body.estimatedCompletionHours === '') {
+      data.estimatedCompletionHours = null;
+    } else {
+      const h = parseInt(body.estimatedCompletionHours, 10);
+      if (isNaN(h) || h < 1 || h > 720) return { error: 'Processing time must be between 1 and 720 hours.' };
+      data.estimatedCompletionHours = h;
+    }
+  }
+
+  // Pricing: exactly one column is populated, the others cleared, so a service
+  // can never carry a stale price from a previous pricing type.
+  const typeGiven = body.pricingType !== undefined;
+  if (typeGiven || !partial) {
+    const t = String(body.pricingType || 'per_kg');
+    if (!PRICING_TYPES.includes(t)) return { error: 'Invalid pricing type.' };
+    data.pricingType = t;
+  }
+  const effectiveType = data.pricingType;
+  const priceRaw = body.price !== undefined ? body.price
+    : effectiveType === 'per_kg' ? body.pricePerKg
+      : effectiveType === 'fixed' ? body.fixedPrice
+        : body.pricePerItem;
+
+  if (effectiveType && (priceRaw !== undefined || !partial)) {
+    const p = parseFloat(priceRaw);
+    if (isNaN(p) || p <= 0) return { error: 'Price must be greater than 0.' };
+    if (p > 100000) return { error: 'Price is unrealistically high.' };
+    data.pricePerKg = effectiveType === 'per_kg' ? p : null;
+    data.fixedPrice = effectiveType === 'fixed' ? p : null;
+    data.pricePerItem = effectiveType === 'per_item' ? p : null;
+  }
+
+  return { data };
+}
+
+router.get('/service-categories', (req, res) => {
+  res.json({ categories: SERVICE_CATEGORIES, pricingTypes: PRICING_TYPES, statuses: SERVICE_STATUSES });
+});
+
+// List the caller's own services.
+router.get('/services', async (req, res) => {
+  try {
+    const rows = await prisma.laundryService.findMany({
+      where: { providerId: req.user.id, deletedAt: null },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    });
+    // Orders reference a service by NAME (LaundryRequest.laundryType is a plain
+    // string with no FK), so count this provider's orders grouped by that name.
+    const grouped = await prisma.laundryRequest.groupBy({
+      by: ['laundryType'],
+      where: { providerId: req.user.id },
+      _count: { _all: true },
+    });
+    const counts = new Map(grouped.map((g) => [g.laundryType, g._count._all]));
+    res.json({
+      count: rows.length,
+      services: rows.map((s) => ({ ...shapeService(s), orderCount: counts.get(s.name) || 0 })),
+    });
+  } catch (error) {
+    console.error('List services error:', error);
+    res.status(500).json({ error: 'Failed to load services.' });
+  }
+});
+
+router.post('/services', async (req, res) => {
+  try {
+    const { data, error } = buildServiceData(req.body);
+    if (error) return res.status(400).json({ error });
+
+    const created = await prisma.laundryService.create({
+      data: { ...data, providerId: req.user.id },
+    });
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    res.status(201).json({ message: 'Service created.', service: shapeService(created) });
+  } catch (error) {
+    console.error('Create service error:', error);
+    res.status(500).json({ error: 'Failed to create service.' });
+  }
+});
+
+router.patch('/services/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await prisma.laundryService.findFirst({
+      where: { id, providerId: req.user.id, deletedAt: null },
+    });
+    if (!existing) return res.status(404).json({ error: 'Service not found.' });
+
+    // Merge the stored pricing type so a price-only edit stays consistent.
+    const body = { ...req.body };
+    if (body.pricingType === undefined && (body.price !== undefined)) body.pricingType = existing.pricingType;
+
+    const { data, error } = buildServiceData(body, { partial: true });
+    if (error) return res.status(400).json({ error });
+    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'No valid fields to update.' });
+
+    const updated = await prisma.laundryService.update({ where: { id }, data });
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    res.json({ message: 'Service updated.', service: shapeService(updated) });
+  } catch (error) {
+    console.error('Update service error:', error);
+    res.status(500).json({ error: 'Failed to update service.' });
+  }
+});
+
+// Soft delete — stops future bookings, never touches order history.
+router.delete('/services/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await prisma.laundryService.findFirst({
+      where: { id, providerId: req.user.id, deletedAt: null },
+    });
+    if (!existing) return res.status(404).json({ error: 'Service not found.' });
+
+    await prisma.laundryService.update({ where: { id }, data: { deletedAt: new Date() } });
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    res.json({ message: 'Service removed. Existing orders are unaffected.' });
+  } catch (error) {
+    console.error('Delete service error:', error);
+    res.status(500).json({ error: 'Failed to delete service.' });
   }
 });
 

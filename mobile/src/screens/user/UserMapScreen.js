@@ -215,12 +215,11 @@ export default function UserMapScreen({ navigation }) {
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const toggleFilter = useCallback((key) => setFilters((f) => ({ ...f, [key]: !f[key] })), []);
-  const toggleSort = useCallback(() => setSortBy((s) => (s === 'rating' ? 'nearest' : 'rating')), []);
-  const anyFilterActive = filters.openNow || filters.verified || filters.delivers || filters.accepting;
+  const anyFilterActive = filters.openNow || filters.verified || filters.delivers || filters.accepting || sortBy !== 'nearest';
   const activeFilterCount =
     (filters.openNow ? 1 : 0) + (filters.verified ? 1 : 0) +
     (filters.delivers ? 1 : 0) + (filters.accepting ? 1 : 0) +
-    (sortBy === 'rating' ? 1 : 0);
+    (sortBy !== 'nearest' ? 1 : 0);
   const clearAll = useCallback(() => {
     setFilters({ openNow: false, verified: false, delivers: false, accepting: false });
     setSortBy('nearest');
@@ -326,6 +325,11 @@ export default function UserMapScreen({ navigation }) {
     if (sortBy === 'rating') {
       return [...list].sort((a, b) =>
         (b.avgRating || 0) - (a.avgRating || 0) ||
+        (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
+    }
+    if (sortBy === 'fastest') {
+      return [...list].sort((a, b) =>
+        (a.estimatedPickupMin ?? 1e9) - (b.estimatedPickupMin ?? 1e9) ||
         (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
     }
     // 'nearest' — favorites first, then nearby, then the rest, each by distance.
@@ -478,14 +482,14 @@ export default function UserMapScreen({ navigation }) {
         )}
       </View>
 
-      {/* Filter chips — compact, horizontally scrollable (Hubtels style) */}
+      {/* Filter chips — compact, left-aligned, horizontally scrollable */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
         <FilterChip icon="options-outline" label="Filters" active={activeFilterCount > 0} badge={activeFilterCount || null} onPress={() => setSheetOpen(true)} />
-        <FilterChip icon="swap-vertical-outline" label={sortBy === 'rating' ? 'Top rated' : 'Nearest'} chevron onPress={toggleSort} />
+        <FilterChip icon="navigate-outline" label="Nearest" active={sortBy === 'nearest'} onPress={() => setSortBy('nearest')} />
         <FilterChip icon="time-outline" label="Open now" active={filters.openNow} onPress={() => toggleFilter('openNow')} />
         <FilterChip icon="shield-checkmark-outline" label="Verified" active={filters.verified} onPress={() => toggleFilter('verified')} />
-        <FilterChip icon="cube-outline" label="Delivers" active={filters.delivers} onPress={() => toggleFilter('delivers')} />
-        <FilterChip icon="storefront-outline" label="Accepting" active={filters.accepting} onPress={() => toggleFilter('accepting')} />
+        <FilterChip icon="cube-outline" label="Delivery" active={filters.delivers} onPress={() => toggleFilter('delivers')} />
+        <FilterChip icon="star-outline" label="Top rated" active={sortBy === 'rating'} onPress={() => setSortBy('rating')} />
         {(anyFilterActive || query.length > 0) && (
           <FilterChip icon="close" label="Clear" clear onPress={clearAll} />
         )}
@@ -649,7 +653,7 @@ export default function UserMapScreen({ navigation }) {
         filters={filters}
         toggleFilter={toggleFilter}
         sortBy={sortBy}
-        toggleSort={toggleSort}
+        setSortBy={setSortBy}
         count={activeFilterCount}
         onClear={clearAll}
       />
@@ -659,28 +663,36 @@ export default function UserMapScreen({ navigation }) {
 
 function FilterChip({ icon, label, active, clear, chevron, badge, onPress }) {
   const tint = clear ? '#ef4444' : active ? '#fff' : '#6B7280';
+  // Tap scale for tactile feedback (~200ms spring).
+  const scale = useRef(new Animated.Value(1)).current;
+  const pin = () => Animated.spring(scale, { toValue: 0.93, useNativeDriver: true, speed: 40, bounciness: 0 }).start();
+  const pout = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
   return (
-    <TouchableOpacity
-      style={[styles.filterChip, active && styles.filterChipActive, clear && styles.filterChipClear]}
-      onPress={onPress}
-      activeOpacity={0.85}
-    >
-      {icon && <Ionicons name={icon} size={16} color={tint} />}
-      <Text style={[styles.filterChipText, active && styles.filterChipTextActive, clear && styles.filterChipTextClear]}>
-        {label}
-      </Text>
-      {badge != null && (
-        <View style={[styles.chipBadge, active && styles.chipBadgeActive]}>
-          <Text style={styles.chipBadgeText}>{badge}</Text>
-        </View>
-      )}
-      {chevron && <Ionicons name="chevron-down" size={14} color={tint} />}
-    </TouchableOpacity>
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <TouchableOpacity
+        style={[styles.filterChip, active && styles.filterChipActive, clear && styles.filterChipClear]}
+        onPress={onPress}
+        onPressIn={pin}
+        onPressOut={pout}
+        activeOpacity={0.85}
+      >
+        {icon && <Ionicons name={icon} size={16} color={tint} />}
+        <Text style={[styles.filterChipText, active && styles.filterChipTextActive, clear && styles.filterChipTextClear]}>
+          {label}
+        </Text>
+        {badge != null && (
+          <View style={[styles.chipBadge, active && styles.chipBadgeActive]}>
+            <Text style={styles.chipBadgeText}>{badge}</Text>
+          </View>
+        )}
+        {chevron && <Ionicons name="chevron-down" size={14} color={tint} />}
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
-// Modern compact bottom sheet — same functional filters, wrap-friendly grid.
-function FilterSheet({ visible, onClose, filters, toggleFilter, sortBy, toggleSort, count, onClear }) {
+// Modern compact bottom sheet — Sort (single-select) + Filters (toggles).
+function FilterSheet({ visible, onClose, filters, toggleFilter, sortBy, setSortBy, count, onClear }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={onClose} />
@@ -693,12 +705,19 @@ function FilterSheet({ visible, onClose, filters, toggleFilter, sortBy, toggleSo
           </TouchableOpacity>
         </View>
 
+        <Text style={styles.sheetSectionLabel}>Sort by</Text>
         <View style={styles.sheetChipsWrap}>
-          <FilterChip icon="swap-vertical-outline" label={sortBy === 'rating' ? 'Top rated' : 'Nearest'} chevron onPress={toggleSort} />
+          <FilterChip icon="navigate-outline" label="Nearest" active={sortBy === 'nearest'} onPress={() => setSortBy('nearest')} />
+          <FilterChip icon="star-outline" label="Top rated" active={sortBy === 'rating'} onPress={() => setSortBy('rating')} />
+          <FilterChip icon="flash-outline" label="Fastest service" active={sortBy === 'fastest'} onPress={() => setSortBy('fastest')} />
+        </View>
+
+        <Text style={styles.sheetSectionLabel}>Filters</Text>
+        <View style={styles.sheetChipsWrap}>
           <FilterChip icon="time-outline" label="Open now" active={filters.openNow} onPress={() => toggleFilter('openNow')} />
           <FilterChip icon="shield-checkmark-outline" label="Verified" active={filters.verified} onPress={() => toggleFilter('verified')} />
-          <FilterChip icon="cube-outline" label="Delivers" active={filters.delivers} onPress={() => toggleFilter('delivers')} />
-          <FilterChip icon="storefront-outline" label="Accepting" active={filters.accepting} onPress={() => toggleFilter('accepting')} />
+          <FilterChip icon="cube-outline" label="Delivery" active={filters.delivers} onPress={() => toggleFilter('delivers')} />
+          <FilterChip icon="storefront-outline" label="Pickup" active={filters.accepting} onPress={() => toggleFilter('accepting')} />
         </View>
 
         <TouchableOpacity style={styles.applyBtn} onPress={onClose} activeOpacity={0.9}>
@@ -1003,7 +1022,7 @@ const styles = StyleSheet.create({
   // Radius
   radiusRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 6, gap: 8 },
   radiusLabel: { fontSize: 13, fontWeight: '600', color: '#6b7280' },
-  radiusChip: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 16, paddingVertical: 5, paddingHorizontal: 12, backgroundColor: '#F5F7FA' },
+  radiusChip: { height: 32, justifyContent: 'center', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 16, paddingHorizontal: 14, backgroundColor: '#F5F7FA' },
   radiusChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
   radiusChipText: { fontSize: 12, color: '#374151', fontWeight: '600' },
   radiusChipTextActive: { color: '#fff' },
@@ -1017,12 +1036,12 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 14, color: '#1f2937', padding: 0 },
 
-  // Filter chips — Hubtels spec: compact pills, subtle bg, blue active
-  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 16, paddingVertical: 8 },
+  // Filter chips — compact left-aligned pills (Uber Eats / Bolt / Hubtel style)
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
   filterChip: {
     flexDirection: 'row', alignItems: 'center', gap: 6, height: 38,
     borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 20,
-    paddingHorizontal: 14, backgroundColor: '#F5F7FA',
+    paddingHorizontal: 14, backgroundColor: '#FFFFFF',
   },
   filterChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
   filterChipClear: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
@@ -1043,7 +1062,8 @@ const styles = StyleSheet.create({
   sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: '#E5E7EB', marginBottom: 14 },
   sheetHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   sheetTitle: { fontSize: 20, fontWeight: '800', color: '#111827' },
-  sheetChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 22 },
+  sheetSectionLabel: { fontSize: 13, fontWeight: '700', color: '#6B7280', marginBottom: 10, letterSpacing: 0.2 },
+  sheetChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 18 },
   applyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#2563EB', borderRadius: 14, paddingVertical: 15 },
   applyBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   applyBadge: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: 'rgba(255,255,255,0.28)', alignItems: 'center', justifyContent: 'center' },

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator, Linking, Modal, Platform,
+  Animated, Dimensions,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -16,6 +17,15 @@ import EmptyState from '../../components/EmptyState';
 import { Skeleton } from '../../components/Skeleton';
 import { providerLogo } from '../../theme/images';
 
+// ── Service grid geometry ──────────────────────────────────
+// Card width is computed from the screen so two columns ALWAYS fit exactly.
+// (A percentage width plus margins plus gap overflowed by a few px, which made
+// flexWrap drop every card onto its own row — the grid rendered as a list.)
+const SCREEN_W = Dimensions.get('window').width;
+const GRID_PAD = 16;   // outer padding either side
+const GRID_GAP = 12;   // space between the two columns
+const CARD_W = Math.floor((SCREEN_W - GRID_PAD * 2 - GRID_GAP) / 2);
+
 // Service card icon by name.
 function serviceIcon(name) {
   const n = (name || '').toLowerCase();
@@ -23,6 +33,10 @@ function serviceIcon(name) {
   if (n.includes('iron')) return 'shirt-outline';
   if (n.includes('express')) return 'flash-outline';
   if (n.includes('delicate')) return 'flower-outline';
+  if (n.includes('blanket') || n.includes('duvet') || n.includes('bed')) return 'bed-outline';
+  if (n.includes('shoe') || n.includes('sneaker')) return 'footsteps-outline';
+  if (n.includes('curtain')) return 'browsers-outline';
+  if (n.includes('fold')) return 'layers-outline';
   return 'water-outline';
 }
 
@@ -258,19 +272,14 @@ export default function NewRequestScreen({ navigation, route }) {
         {/* ── Services ── */}
         <SectionTitle icon="pricetags-outline" text="Laundry Service" />
         <View style={styles.serviceGrid}>
-          {services.map((s) => {
-            const active = form.laundryType === s.serviceType;
-            return (
-              <TouchableOpacity key={s.id} style={[styles.serviceCard, active && styles.serviceCardActive]} onPress={() => update('laundryType', s.serviceType)} activeOpacity={0.85}>
-                <View style={[styles.serviceIcon, active && { backgroundColor: '#dbeafe' }]}>
-                  <Ionicons name={serviceIcon(s.serviceType)} size={22} color={active ? '#1B7BF7' : '#6b7280'} />
-                </View>
-                <Text style={[styles.serviceName, active && { color: '#1B7BF7' }]} numberOfLines={1}>{s.serviceType}</Text>
-                <Text style={styles.servicePrice}>{formatCurrency(s.pricePerKg)}/kg</Text>
-                {active && <View style={styles.serviceCheck}><Ionicons name="checkmark-circle" size={20} color="#1B7BF7" /></View>}
-              </TouchableOpacity>
-            );
-          })}
+          {services.map((s) => (
+            <ServiceCard
+              key={s.id}
+              service={s}
+              active={form.laundryType === s.serviceType}
+              onPress={() => update('laundryType', s.serviceType)}
+            />
+          ))}
         </View>
 
         {/* Weight */}
@@ -455,6 +464,42 @@ export default function NewRequestScreen({ navigation, route }) {
   );
 }
 
+// Selectable service tile in the 2-column grid. Press gives a spring scale for
+// tactile feedback; selection is purely visual — the parent still owns
+// form.laundryType and the same update() call as before.
+function ServiceCard({ service, active, onPress }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const pressIn = () =>
+    Animated.spring(scale, { toValue: 0.96, useNativeDriver: true, speed: 40, bounciness: 0 }).start();
+  const pressOut = () =>
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 40, bounciness: 8 }).start();
+
+  return (
+    <Animated.View style={{ width: CARD_W, transform: [{ scale }] }}>
+      <TouchableOpacity
+        style={[styles.serviceCard, active && styles.serviceCardActive]}
+        onPress={onPress}
+        onPressIn={pressIn}
+        onPressOut={pressOut}
+        activeOpacity={0.9}
+      >
+        <View style={[styles.serviceIcon, active && styles.serviceIconActive]}>
+          <Ionicons name={serviceIcon(service.serviceType)} size={22} color={active ? '#fff' : '#6b7280'} />
+        </View>
+        <Text style={[styles.serviceName, active && styles.serviceNameActive]} numberOfLines={2}>
+          {service.serviceType}
+        </Text>
+        <Text style={styles.servicePrice}>{formatCurrency(service.pricePerKg)}/kg</Text>
+        {active && (
+          <View style={styles.serviceCheck}>
+            <Ionicons name="checkmark-circle" size={20} color="#1B7BF7" />
+          </View>
+        )}
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
 function SectionTitle({ icon, text }) {
   return (
     <View style={styles.sectionTitleRow}>
@@ -494,11 +539,26 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#fff', marginHorizontal: 16, borderRadius: 16, padding: 14, elevation: 1, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, shadowOffset: { width: 0, height: 1 } },
 
   // Services
-  serviceGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, gap: 8 },
-  serviceCard: { width: '47%', backgroundColor: '#fff', borderRadius: 14, padding: 14, borderWidth: 1.5, borderColor: '#eef2f7', marginHorizontal: 4, marginBottom: 4 },
-  serviceCardActive: { borderColor: '#1B7BF7', backgroundColor: '#f5f9ff' },
-  serviceIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  serviceName: { fontSize: 14, fontWeight: '700', color: '#1f2937' },
+  // 2-column grid. Width comes from CARD_W (computed from the screen) and the
+  // only spacing is `gap` — no margins competing with it, so two cards always
+  // fit on a row instead of wrapping into a single column.
+  serviceGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: GRID_PAD, gap: GRID_GAP },
+  serviceCard: {
+    width: '100%', backgroundColor: '#fff', borderRadius: 18, padding: 14,
+    borderWidth: 1.5, borderColor: '#eef2f7',
+    shadowColor: '#0f172a', shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  serviceCardActive: {
+    borderColor: '#1B7BF7', backgroundColor: '#f5f9ff',
+    shadowColor: '#1B7BF7', shadowOpacity: 0.18, shadowRadius: 10, elevation: 3,
+  },
+  serviceIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  serviceIconActive: { backgroundColor: '#1B7BF7' },
+  // minHeight reserves two lines so every card is the same height regardless of
+  // whether the service name wraps.
+  serviceName: { fontSize: 14, fontWeight: '700', color: '#1f2937', lineHeight: 18, minHeight: 36 },
+  serviceNameActive: { color: '#1B7BF7' },
   servicePrice: { fontSize: 13, fontWeight: '700', color: '#059669', marginTop: 2 },
   serviceCheck: { position: 'absolute', top: 10, right: 10 },
 

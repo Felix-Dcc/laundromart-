@@ -619,7 +619,13 @@ router.delete('/services/:id/images/:imageId', async (req, res) => {
     });
     if (!img) return res.status(404).json({ error: 'Image not found.' });
 
-    await cloudinary.destroy(img.publicId); // best-effort; row goes either way
+    // Best-effort: the row is removed either way, otherwise a Cloudinary outage
+    // would strand the image in the provider's gallery forever. Log failures so
+    // an orphaned asset is at least diagnosable.
+    const destroyed = await cloudinary.destroy(img.publicId);
+    if (!destroyed.ok) {
+      console.warn(`[images] Cloudinary destroy failed for ${img.publicId}:`, destroyed.result || destroyed.reason);
+    }
     await prisma.laundryServiceImage.delete({ where: { id: img.id } });
     await syncCover(service.id);
     await cacheDel(KEYS.activeProviders).catch(() => {});

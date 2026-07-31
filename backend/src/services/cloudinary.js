@@ -56,10 +56,15 @@ async function destroy(publicId) {
   if (!isConfigured() || !publicId) return { ok: false, reason: 'not-configured' };
   try {
     const timestamp = Math.floor(Date.now() / 1000);
-    const signature = sign({ public_id: publicId, timestamp });
+    // `invalidate` purges cached derivatives from the CDN. Without it the
+    // original is removed but transformed copies keep serving for up to ~24h —
+    // so a "deleted" image would still be visible to customers. It must be part
+    // of the signed params, not just the body.
+    const signature = sign({ invalidate: true, public_id: publicId, timestamp });
     const body = new URLSearchParams({
       public_id: publicId,
       timestamp: String(timestamp),
+      invalidate: 'true',
       api_key: config.cloudinary.apiKey,
       signature,
     });

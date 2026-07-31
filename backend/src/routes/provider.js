@@ -497,11 +497,13 @@ async function syncCover(serviceId) {
 // Short-lived credentials so the phone can upload straight to Cloudinary.
 router.post('/services/:id/images/signature', async (req, res) => {
   try {
+    // Ownership first: a caller who doesn't own the service should never learn
+    // anything about server configuration.
+    const service = await findOwnedService(req, req.params.id);
+    if (!service) return res.status(404).json({ error: 'Service not found.' });
     if (!cloudinary.isConfigured()) {
       return res.status(503).json({ error: 'Image uploads are not configured yet.' });
     }
-    const service = await findOwnedService(req, req.params.id);
-    if (!service) return res.status(404).json({ error: 'Service not found.' });
 
     const count = await prisma.laundryServiceImage.count({ where: { serviceId: service.id } });
     if (count >= MAX_IMAGES) {

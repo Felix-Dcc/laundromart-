@@ -160,8 +160,11 @@ module.exports = {
         {
           photosPermission:
             'Allow LaundroMart to access your photos so you can add images to your laundry services.',
-          cameraPermission:
-            'Allow LaundroMart to use your camera to photograph your laundry services.',
+          // NOTE: deliberately no cameraPermission. We only ever call
+          // launchImageLibraryAsync, never the camera. Declaring CAMERA makes
+          // Google Play implicitly require android.hardware.camera, which
+          // excluded ~400 camera-less devices from the v6 release. Only add it
+          // back alongside a <uses-feature ... required="false"> declaration.
         },
       ],
       [

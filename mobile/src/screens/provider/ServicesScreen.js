@@ -441,16 +441,28 @@ function ImageGallery({ serviceId, initial }) {
       Alert.alert('Limit reached', `A service can have at most ${MAX_IMAGES} images.`);
       return;
     }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission needed', 'Allow photo access to add service images.');
+    // Android 13+ uses the system photo picker, which needs NO permission — so a
+    // not-granted result there is not a blocker. Only bail when the user has
+    // hard-denied and we can't even ask again; otherwise open the picker and let
+    // it fail naturally rather than refusing up front.
+    let perm = { granted: true, canAskAgain: true };
+    try { perm = await ImagePicker.requestMediaLibraryPermissionsAsync(); } catch { /* older/newer API differences */ }
+    if (!perm.granted && perm.canAskAgain === false) {
+      Alert.alert('Photo access blocked', 'Enable photo access for LaundroMart in your device settings to add service images.');
       return;
     }
-    const picked = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.8,           // compress before upload — keeps us well under 5MB
-      allowsEditing: false,
-    });
+
+    let picked;
+    try {
+      picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,         // compress before upload — keeps us well under 5MB
+        allowsEditing: false,
+      });
+    } catch (e) {
+      Alert.alert('Could not open photos', e.message || 'Please allow photo access and try again.');
+      return;
+    }
     if (picked.canceled || !picked.assets?.length) return;
     const asset = picked.assets[0];
 

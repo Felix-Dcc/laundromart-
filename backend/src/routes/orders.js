@@ -128,12 +128,13 @@ router.get('/:id/eta', async (req, res) => {
 // Body: { code, laundryType, weightKg }
 router.post('/promo-quote', requireUser, async (req, res) => {
   try {
-    const { code, laundryType, weightKg } = req.body;
+    const { code, laundryType, weightKg, providerId } = req.body;
     const weight = parseFloat(weightKg);
     if (!code || !laundryType || !weight || weight <= 0) {
       return res.status(400).json({ error: 'Code, service and weight are required.' });
     }
-    const subtotal = await calculateLaundryCost(laundryType, weight);
+    // Quote against the same price the order will actually use.
+    const subtotal = await calculateLaundryCost(laundryType, weight, providerId);
     const result = await promo.quote(code, subtotal);
     res.json({ subtotal, ...result });
   } catch (error) {
@@ -181,7 +182,8 @@ router.post('/', requireUser, async (req, res) => {
       return res.status(e.httpStatus || 400).json({ errors: [e.message] });
     }
 
-    const totalAmount = await calculateLaundryCost(laundryType, weight);
+    // providerId => the chosen laundromat's own price wins, else global pricing.
+    const totalAmount = await calculateLaundryCost(laundryType, weight, providerId);
     const requestNumber = generateRequestNumber();
 
     // Optional promo code — validated against the estimate subtotal.

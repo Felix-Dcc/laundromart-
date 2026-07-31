@@ -2,12 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator, Linking, Modal, Platform,
-  Animated, Dimensions,
+  Animated, Dimensions, Image,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { pricingAPI, ordersAPI } from '../../api/client';
+import { pricingAPI, ordersAPI, nearbyAPI } from '../../api/client';
 import { formatCurrency, isToday as isTodayISO, nowRoundedUpTo5HHMM, formatDate, formatTime } from '../../utils/helpers';
 import { useAuth } from '../../context/AuthContext';
 import DatePicker from '../../components/DatePicker';
@@ -80,17 +80,34 @@ export default function NewRequestScreen({ navigation, route }) {
       pickupLat: prev.pickupLat ?? user?.latitude ?? null,
       pickupLng: prev.pickupLng ?? user?.longitude ?? null,
     }));
-    loadServices();
   }, []);
 
   useEffect(() => {
     if (route?.params?.provider) setLaundromat(route.params.provider);
   }, [route?.params?.provider]);
 
-  async function loadServices() {
+  // Services belong to the chosen laundromat, so reload whenever it changes.
+  useEffect(() => {
+    setLoading(true);
+    loadServices(laundromat?.id);
+  }, [laundromat?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadServices(providerId) {
     try {
-      const res = await pricingAPI.getActive();
-      const list = res.data.pricing || [];
+      let list = [];
+      // Prefer the chosen laundromat's OWN services (their prices, their photos).
+      // Providers who haven't set any up fall back to the platform-wide list, so
+      // the booking flow is unchanged for them.
+      if (providerId) {
+        try {
+          const own = await nearbyAPI.getProviderServices(providerId);
+          list = (own.data.services || []).filter((s) => s.bookable !== false);
+        } catch { /* fall through to the global list */ }
+      }
+      if (!list.length) {
+        const res = await pricingAPI.getActive();
+        list = res.data.pricing || [];
+      }
       setServices(list);
       // Preselect the first service for a faster start.
       setForm((prev) => ({ ...prev, laundryType: prev.laundryType || list[0]?.serviceType || '' }));
@@ -130,8 +147,16 @@ export default function NewRequestScreen({ navigation, route }) {
   }
 
   const selectedService = services.find((s) => s.serviceType === form.laundryType);
-  const estimate = selectedService && parseFloat(form.weightKg) > 0
-    ? parseFloat(selectedService.pricePerKg) * parseFloat(form.weightKg) : 0;
+  // Fixed-price services are flat and ignore weight; per-kg (and the global
+  // pricing list, which is always per-kg) multiply by the estimated weight.
+  const estimate = (() => {
+    if (!selectedService) return 0;
+    if (selectedService.pricingType === 'fixed') return Number(selectedService.price) || 0;
+    const w = parseFloat(form.weightKg);
+    if (!(w > 0)) return 0;
+    const rate = parseFloat(selectedService.pricePerKg ?? selectedService.price);
+    return isNaN(rate) ? 0 : rate * w;
+  })();
   const discountedTotal = promoQuote?.ok ? promoQuote.total : estimate;
   const pickupIsToday = isTodayISO(form.pickupDate);
 
@@ -147,7 +172,7 @@ export default function NewRequestScreen({ navigation, route }) {
     }
     setPromoBusy(true);
     try {
-      const res = await ordersAPI.promoQuote(code, form.laundryType, parseFloat(form.weightKg));
+      const res = await ordersAPI.promoQuote(code, form.laundryType, parseFloat(form.weightKg), laundromat?.id);
       setPromoQuote(res.data);
       if (!res.data.ok) Alert.alert('Promo code', res.data.reason || 'This code cannot be applied.');
     } catch (e) {
@@ -483,13 +508,21 @@ function ServiceCard({ service, active, onPress }) {
         onPressOut={pressOut}
         activeOpacity={0.9}
       >
-        <View style={[styles.serviceIcon, active && styles.serviceIconActive]}>
-          <Ionicons name={serviceIcon(service.serviceType)} size={22} color={active ? '#fff' : '#6b7280'} />
-        </View>
+        {/* The laundromat's own photo when they've uploaded one, else the icon. */}
+        {service.coverImage ? (
+          <Image source={{ uri: service.coverImage }} style={styles.servicePhoto} resizeMode="cover" />
+        ) : (
+          <View style={[styles.serviceIcon, active && styles.serviceIconActive]}>
+            <Ionicons name={serviceIcon(service.serviceType)} size={22} color={active ? '#fff' : '#6b7280'} />
+          </View>
+        )}
         <Text style={[styles.serviceName, active && styles.serviceNameActive]} numberOfLines={2}>
           {service.serviceType}
         </Text>
-        <Text style={styles.servicePrice}>{formatCurrency(service.pricePerKg)}/kg</Text>
+        <Text style={styles.servicePrice}>
+          {formatCurrency(service.pricingType === 'fixed' ? service.price : (service.pricePerKg ?? service.price))}
+          {service.pricingType === 'fixed' ? '' : '/kg'}
+        </Text>
         {active && (
           <View style={styles.serviceCheck}>
             <Ionicons name="checkmark-circle" size={20} color="#1B7BF7" />
@@ -554,6 +587,7 @@ const styles = StyleSheet.create({
     shadowColor: '#1B7BF7', shadowOpacity: 0.18, shadowRadius: 10, elevation: 3,
   },
   serviceIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  servicePhoto: { width: '100%', height: 72, borderRadius: 12, marginBottom: 10, backgroundColor: '#f3f4f6' },
   serviceIconActive: { backgroundColor: '#1B7BF7' },
   // minHeight reserves two lines so every card is the same height regardless of
   // whether the service name wraps.

@@ -217,8 +217,10 @@ async function verifyWeight({ orderId, actor, actualWeightKg, req = null }) {
     throw new TransitionError('ALREADY_PAID', 'The weight cannot be changed after payment.', 409);
   }
 
-  // Final price is ALWAYS computed on the server from the active pricing table.
-  let finalAmount = await calculateLaundryCost(order.laundryType, weight);
+  // Final price is ALWAYS computed on the server. Pass the provider so their own
+  // service price is used when the order was placed against one; otherwise this
+  // resolves to the global pricing table exactly as before.
+  let finalAmount = await calculateLaundryCost(order.laundryType, weight, order.providerId);
   // Fallback: derive per-kg rate from the original estimate if pricing is missing.
   if (!finalAmount && Number(order.weightKg) > 0) {
     finalAmount = (Number(order.totalAmount) / Number(order.weightKg)) * weight;

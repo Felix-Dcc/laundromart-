@@ -216,6 +216,57 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // ============================================================
+// GET /api/nearby/providers/:id/services
+// The services a specific laundromat offers, for customers. Only bookable rows:
+// available, not soft-deleted. Returns [] when the provider hasn't defined any,
+// and the client then falls back to the platform-wide service list — so the
+// existing booking flow is unchanged for providers who haven't set theirs up.
+// ============================================================
+router.get('/providers/:id/services', authenticate, async (req, res) => {
+  try {
+    const providerId = parseInt(req.params.id, 10);
+    if (isNaN(providerId)) return res.status(400).json({ error: 'Invalid provider id.' });
+
+    const rows = await prisma.laundryService.findMany({
+      where: { providerId, status: 'available', deletedAt: null },
+      orderBy: [{ createdAt: 'asc' }],
+      include: { images: { orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }] } },
+    });
+
+    const services = rows.map((s) => {
+      const price = s.pricingType === 'per_kg' ? Number(s.pricePerKg)
+        : s.pricingType === 'fixed' ? Number(s.fixedPrice)
+          : Number(s.pricePerItem);
+      return {
+        id: s.id,
+        // `serviceType` mirrors the global pricing shape so the client can render
+        // both lists with one component, and orders keep carrying a name.
+        serviceType: s.name,
+        name: s.name,
+        description: s.description,
+        category: s.category,
+        pricingType: s.pricingType,
+        price,
+        // per-kg rate under the field the existing UI already reads
+        pricePerKg: s.pricingType === 'per_kg' ? Number(s.pricePerKg) : null,
+        priceUnit: s.pricingType === 'per_kg' ? '/kg' : s.pricingType === 'per_item' ? ' each' : '',
+        estimatedCompletionHours: s.estimatedCompletionHours,
+        // per_item can't be priced without a quantity on the order, so it is
+        // shown but not bookable yet.
+        bookable: s.pricingType === 'per_kg' || s.pricingType === 'fixed',
+        coverImage: s.coverImage,
+        images: s.images.map((i) => ({ id: i.id, url: i.imageUrl, thumbnailUrl: i.thumbnailUrl, isCover: i.isCover })),
+      };
+    });
+
+    res.json({ count: services.length, providerId, services });
+  } catch (error) {
+    console.error('Provider services error:', error);
+    res.status(500).json({ error: 'Failed to load services for this laundromat.' });
+  }
+});
+
+// ============================================================
 // PUT /api/nearby/update-location — Provider updates own coordinates
 // ============================================================
 router.put('/update-location', authenticate, async (req, res) => {

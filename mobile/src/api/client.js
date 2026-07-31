@@ -193,7 +193,8 @@ export const ordersAPI = {
   getRiderLocation: (id) => api.get(`/orders/${id}/rider-location`),
   create: (data) => api.post('/orders', data),
   cancel: (id) => api.put(`/orders/${id}/cancel`),
-  promoQuote: (code, laundryType, weightKg) => api.post('/orders/promo-quote', { code, laundryType, weightKg }),
+  // providerId lets the server quote against the laundromat's own price.
+  promoQuote: (code, laundryType, weightKg, providerId) => api.post('/orders/promo-quote', { code, laundryType, weightKg, providerId }),
 };
 
 // ========================
@@ -294,6 +295,9 @@ export const notificationsAPI = {
 export const nearbyAPI = {
   getProviders: (lat, lng, radius) => api.get('/nearby', { params: { lat, lng, radius } }),
   getAllLaundromats: (lat, lng) => api.get('/nearby/all', { params: { lat, lng } }),
+  // A specific laundromat's own services (with photos). Empty => caller falls
+  // back to the platform-wide pricing list.
+  getProviderServices: (providerId) => api.get(`/nearby/providers/${providerId}/services`),
   updateLocation: (data) => api.put('/nearby/update-location', data),
 };
 

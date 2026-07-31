@@ -482,21 +482,24 @@ export default function UserMapScreen({ navigation }) {
         )}
       </View>
 
-      {/* Filter chips — compact, left-aligned, horizontally scrollable */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-        <FilterChip icon="options-outline" label="Filters" active={activeFilterCount > 0} badge={activeFilterCount || null} onPress={() => setSheetOpen(true)} />
-        <FilterChip icon="navigate-outline" label="Nearest" active={sortBy === 'nearest'} onPress={() => setSortBy('nearest')} />
-        <FilterChip icon="time-outline" label="Open now" active={filters.openNow} onPress={() => toggleFilter('openNow')} />
-        <FilterChip icon="shield-checkmark-outline" label="Verified" active={filters.verified} onPress={() => toggleFilter('verified')} />
-        <FilterChip icon="cube-outline" label="Delivery" active={filters.delivers} onPress={() => toggleFilter('delivers')} />
-        <FilterChip icon="star-outline" label="Top rated" active={sortBy === 'rating'} onPress={() => setSortBy('rating')} />
-        {(anyFilterActive || query.length > 0) && (
-          <FilterChip icon="close" label="Clear" clear onPress={clearAll} />
-        )}
-      </ScrollView>
+      {/* Filter chips — List tab only. Not mounted at all on Map so the radius
+          selector sits directly under the search bar with no blank gap. */}
+      {viewMode === 'list' && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+          <FilterChip icon="options-outline" label="Filters" active={activeFilterCount > 0} badge={activeFilterCount || null} onPress={() => setSheetOpen(true)} />
+          <FilterChip icon="navigate-outline" label="Nearest" active={sortBy === 'nearest'} onPress={() => setSortBy('nearest')} />
+          <FilterChip icon="time-outline" label="Open now" active={filters.openNow} onPress={() => toggleFilter('openNow')} />
+          <FilterChip icon="shield-checkmark-outline" label="Verified" active={filters.verified} onPress={() => toggleFilter('verified')} />
+          <FilterChip icon="cube-outline" label="Delivery" active={filters.delivers} onPress={() => toggleFilter('delivers')} />
+          <FilterChip icon="star-outline" label="Top rated" active={sortBy === 'rating'} onPress={() => setSortBy('rating')} />
+          {(anyFilterActive || query.length > 0) && (
+            <FilterChip icon="close" label="Clear" clear onPress={clearAll} />
+          )}
+        </ScrollView>
+      )}
 
       {/* Radius selector */}
-      <View style={styles.radiusRow}>
+      <View style={[styles.radiusRow, viewMode === 'map' && styles.radiusRowNoChips]}>
         <Text style={styles.radiusLabel}>Radius:</Text>
         {RADIUS_OPTIONS.map((r) => (
           <TouchableOpacity
@@ -1021,6 +1024,9 @@ const styles = StyleSheet.create({
 
   // Radius
   radiusRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 6, gap: 8 },
+  // Map tab has no chip row above, so restore the breathing room the chips'
+  // vertical padding used to provide. List tab spacing is untouched.
+  radiusRowNoChips: { marginTop: 12 },
   radiusLabel: { fontSize: 13, fontWeight: '600', color: '#6b7280' },
   radiusChip: { height: 32, justifyContent: 'center', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 16, paddingHorizontal: 14, backgroundColor: '#F5F7FA' },
   radiusChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },

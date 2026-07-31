@@ -21,9 +21,12 @@ const extraApiUrl =
   Constants.manifest?.extra?.apiUrl ??
   Constants.manifest2?.extra?.expoClient?.extra?.apiUrl ??
   null;
-const envUrl =
-  extraApiUrl ||
-  (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_URL : null);
+// NOTE: written as a plain member expression. `process.env?.EXPO_PUBLIC_API_URL`
+// (optional chaining) is NOT statically inlined by Expo's babel plugin, so it
+// resolved to undefined in release builds and silently fell back to 10.0.2.2 —
+// that is the bug that shipped in versionCode 4. Keep this form.
+const inlinedEnvUrl = process.env.EXPO_PUBLIC_API_URL;
+const envUrl = extraApiUrl || inlinedEnvUrl || null;
 // On Android, localhost points to the emulator—never use it; use 10.0.2.2 or your PC's LAN IP.
 const effectiveEnvUrl =
   Platform.OS === 'android' && envUrl && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))

@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
   Modal, Alert, ActivityIndicator, RefreshControl, Animated, KeyboardAvoidingView, Platform,
+  Image,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { providerAPI } from '../../api/client';
 import { formatCurrency } from '../../utils/helpers';
@@ -10,6 +12,7 @@ import EmptyState from '../../components/EmptyState';
 import { SkeletonCard } from '../../components/Skeleton';
 
 const BRAND = '#1B7BF7';
+const MAX_IMAGES = 10;
 
 const PRICING_TYPES = [
   { key: 'per_kg', label: 'Per kg', hint: 'Charged by weight', unit: '/kg' },
@@ -379,6 +382,16 @@ function ServiceEditor({ initial, categories, onClose, onSaved }) {
               />
             </Field>
 
+            {/* Images need a serviceId, so they appear once the service exists. */}
+            {isNew ? (
+              <View style={styles.photoLater}>
+                <Ionicons name="images-outline" size={16} color="#6b7280" />
+                <Text style={styles.photoLaterText}>Save the service, then reopen it to add photos.</Text>
+              </View>
+            ) : (
+              <ImageGallery serviceId={initial.id} initial={initial.images || []} />
+            )}
+
             <Field label="Availability">
               <View style={styles.statusGrid}>
                 {STATUSES.map((s) => (
@@ -406,6 +419,158 @@ function ServiceEditor({ initial, categories, onClose, onSaved }) {
         </View>
       </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+// Gallery for one saved service. Uploads go phone → Cloudinary directly using a
+// signature from our API, so large files never pass through the backend.
+function ImageGallery({ serviceId, initial }) {
+  const [images, setImages] = useState(initial || []);
+  const [uploading, setUploading] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+
+  async function refresh() {
+    try {
+      const r = await providerAPI.getServiceImages(serviceId);
+      setImages(r.data.images || []);
+    } catch { /* keep what we have */ }
+  }
+
+  async function pickAndUpload() {
+    if (images.length >= MAX_IMAGES) {
+      Alert.alert('Limit reached', `A service can have at most ${MAX_IMAGES} images.`);
+      return;
+    }
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Allow photo access to add service images.');
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,           // compress before upload — keeps us well under 5MB
+      allowsEditing: false,
+    });
+    if (picked.canceled || !picked.assets?.length) return;
+    const asset = picked.assets[0];
+
+    setUploading(true);
+    try {
+      // 1. short-lived signature from our API
+      const { data: sig } = await providerAPI.getUploadSignature(serviceId);
+
+      // 2. straight to Cloudinary. Only the signed params may be sent.
+      const form = new FormData();
+      form.append('file', {
+        uri: asset.uri,
+        type: asset.mimeType || 'image/jpeg',
+        name: asset.fileName || `service-${Date.now()}.jpg`,
+      });
+      form.append('api_key', String(sig.apiKey));
+      form.append('timestamp', String(sig.timestamp));
+      form.append('folder', sig.folder);
+      form.append('signature', sig.signature);
+
+      const resp = await fetch(sig.uploadUrl, { method: 'POST', body: form });
+      const out = await resp.json();
+      if (!out.public_id) throw new Error(out.error?.message || 'Upload failed.');
+
+      // 3. record it against the service
+      await providerAPI.addServiceImage(serviceId, out.public_id);
+      await refresh();
+    } catch (e) {
+      Alert.alert('Upload failed', e.response?.data?.error || e.message || 'Could not upload that image.');
+    } finally { setUploading(false); }
+  }
+
+  async function remove(img) {
+    Alert.alert('Remove image?', 'This permanently deletes the photo.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setBusyId(img.id);
+          try { await providerAPI.deleteServiceImage(serviceId, img.id); await refresh(); }
+          catch (e) { Alert.alert('Error', e.response?.data?.error || 'Failed to remove image.'); }
+          finally { setBusyId(null); }
+        },
+      },
+    ]);
+  }
+
+  async function makeCover(img) {
+    setBusyId(img.id);
+    try { await providerAPI.updateServiceImages(serviceId, { coverImageId: img.id }); await refresh(); }
+    catch (e) { Alert.alert('Error', e.response?.data?.error || 'Failed to set cover.'); }
+    finally { setBusyId(null); }
+  }
+
+  // Arrow reordering — same result as drag-and-drop without pulling in a
+  // gesture/native dependency.
+  async function move(index, delta) {
+    const next = [...images];
+    const target = index + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    setImages(next);
+    try { await providerAPI.updateServiceImages(serviceId, { order: next.map((i) => i.id) }); }
+    catch { refresh(); }
+  }
+
+  return (
+    <View style={{ marginBottom: 16 }}>
+      <View style={styles.galleryHead}>
+        <Text style={styles.fieldLabel}>Photos ({images.length}/{MAX_IMAGES})</Text>
+        <TouchableOpacity onPress={pickAndUpload} disabled={uploading} activeOpacity={0.85}>
+          <Text style={styles.addPhoto}>{uploading ? 'Uploading…' : '+ Add photo'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {images.length === 0 && !uploading ? (
+        <TouchableOpacity style={styles.photoEmpty} onPress={pickAndUpload} activeOpacity={0.85}>
+          <Ionicons name="images-outline" size={26} color="#9ca3af" />
+          <Text style={styles.photoEmptyText}>Add photos so customers can see your work</Text>
+        </TouchableOpacity>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 4 }}>
+          {images.map((img, i) => (
+            <View key={img.id} style={styles.thumbWrap}>
+              <Image source={{ uri: img.thumbnailUrl || img.url }} style={styles.thumb} />
+              {img.isCover && (
+                <View style={styles.coverTag}><Text style={styles.coverTagText}>Cover</Text></View>
+              )}
+              {busyId === img.id && (
+                <View style={styles.thumbBusy}><ActivityIndicator color="#fff" /></View>
+              )}
+              <View style={styles.thumbBar}>
+                <TouchableOpacity onPress={() => move(i, -1)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                  <Ionicons name="chevron-back" size={15} color="#fff" />
+                </TouchableOpacity>
+                {!img.isCover && (
+                  <TouchableOpacity onPress={() => makeCover(img)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                    <Ionicons name="star-outline" size={15} color="#fff" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => remove(img)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                  <Ionicons name="trash-outline" size={15} color="#fca5a5" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => move(i, 1)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                  <Ionicons name="chevron-forward" size={15} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+          {uploading && (
+            <View style={[styles.thumbWrap, styles.thumbUploading]}>
+              <ActivityIndicator color={BRAND} />
+              <Text style={styles.uploadingText}>Uploading…</Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
+      <Text style={styles.hint}>Tap ★ to set the cover, arrows to reorder. JPG, PNG or WEBP.</Text>
+    </View>
   );
 }
 
@@ -482,6 +647,22 @@ const styles = StyleSheet.create({
   statusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   statusOpt: { borderWidth: 1.5, borderColor: '#e5e7eb', backgroundColor: '#f8fafc', borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10 },
   statusOptText: { fontSize: 13, fontWeight: '600', color: '#374151' },
+
+  // Gallery
+  galleryHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  addPhoto: { color: BRAND, fontWeight: '700', fontSize: 13.5 },
+  photoEmpty: { alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 24, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#d1d5db', borderRadius: 14, backgroundColor: '#f8fafc' },
+  photoEmptyText: { fontSize: 12.5, color: '#6b7280' },
+  photoLater: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f8fafc', borderRadius: 12, padding: 12, marginBottom: 16 },
+  photoLaterText: { flex: 1, fontSize: 12.5, color: '#6b7280' },
+  thumbWrap: { width: 104, height: 104, borderRadius: 14, overflow: 'hidden', backgroundColor: '#f1f5f9' },
+  thumb: { width: '100%', height: '100%' },
+  thumbUploading: { alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#d1d5db' },
+  uploadingText: { fontSize: 11, color: '#6b7280' },
+  thumbBusy: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  coverTag: { position: 'absolute', top: 6, left: 6, backgroundColor: BRAND, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  coverTagText: { color: '#fff', fontSize: 9.5, fontWeight: '800' },
+  thumbBar: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 6, backgroundColor: 'rgba(0,0,0,0.55)' },
 
   saveBtn: { backgroundColor: BRAND, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 6 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },

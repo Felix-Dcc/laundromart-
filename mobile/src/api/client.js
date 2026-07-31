@@ -218,6 +218,12 @@ export const providerAPI = {
   createService: (body) => api.post('/provider/services', body),
   updateService: (id, body) => api.patch(`/provider/services/${id}`, body),
   deleteService: (id) => api.delete(`/provider/services/${id}`),
+  // ── Service images (uploaded straight to Cloudinary with a signed request) ──
+  getServiceImages: (id) => api.get(`/provider/services/${id}/images`),
+  getUploadSignature: (id) => api.post(`/provider/services/${id}/images/signature`),
+  addServiceImage: (id, publicId) => api.post(`/provider/services/${id}/images`, { publicId }),
+  updateServiceImages: (id, body) => api.patch(`/provider/services/${id}/images`, body),
+  deleteServiceImage: (id, imageId) => api.delete(`/provider/services/${id}/images/${imageId}`),
 };
 
 // ========================

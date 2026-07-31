@@ -88,7 +88,11 @@ module.exports = {
   expo: {
     name: 'LaundroMart',
     slug: 'laundromat',
-    version: '1.0.0',
+    // runtimeVersion policy is `appVersion`, so this string IS the OTA
+    // compatibility key. Bumped to 1.1.0 when expo-image-picker (a native
+    // module) was added: 1.0.0 binaries must NOT receive these JS bundles or
+    // they would crash on a missing native module at launch.
+    version: '1.1.0',
     orientation: 'portrait',
     userInterfaceStyle: 'light',
     icon: './assets/icon.png',
@@ -149,6 +153,15 @@ module.exports = {
         {
           locationAlwaysAndWhenInUsePermission:
             'Allow LaundroMart to use your location for finding nearby services and rider navigation.',
+        },
+      ],
+      [
+        'expo-image-picker',
+        {
+          photosPermission:
+            'Allow LaundroMart to access your photos so you can add images to your laundry services.',
+          cameraPermission:
+            'Allow LaundroMart to use your camera to photograph your laundry services.',
         },
       ],
       [

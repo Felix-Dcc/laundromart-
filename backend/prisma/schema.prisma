@@ -198,11 +198,35 @@ model LaundryService {
   createdAt                DateTime      @default(now()) @map("created_at")
   updatedAt                DateTime      @updatedAt @map("updated_at")
 
-  provider User @relation("ProviderServices", fields: [providerId], references: [id], onDelete: Cascade)
+  provider User                  @relation("ProviderServices", fields: [providerId], references: [id], onDelete: Cascade)
+  images   LaundryServiceImage[] @relation("ServiceImages")
 
   @@index([providerId])
   @@index([providerId, status])
   @@map("laundry_services")
+}
+
+// Images for a provider's service. Files live in Cloudinary — the phone uploads
+// directly with a short-lived signature from the backend, so 5MB files never
+// pass through the API server. We keep publicId because it is what Cloudinary's
+// destroy endpoint needs; thumbnails are derived via URL transforms, so there is
+// no server-side image processing.
+model LaundryServiceImage {
+  id           Int      @id @default(autoincrement())
+  serviceId    Int      @map("service_id")
+  providerId   Int      @map("provider_id") // denormalised so ownership checks need no join
+  publicId     String   @map("public_id") @db.VarChar(255)
+  imageUrl     String   @map("image_url") @db.Text
+  thumbnailUrl String?  @map("thumbnail_url") @db.Text
+  displayOrder Int      @default(0) @map("display_order")
+  isCover      Boolean  @default(false) @map("is_cover")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  service LaundryService @relation("ServiceImages", fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId, displayOrder])
+  @@index([providerId])
+  @@map("laundry_service_images")
 }
 
 model LaundryRequest {

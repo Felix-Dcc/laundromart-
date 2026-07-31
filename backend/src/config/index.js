@@ -68,6 +68,16 @@ module.exports = {
     stripeSecret: process.env.STRIPE_SECRET_KEY || '',
     currency: process.env.PAYMENT_CURRENCY || 'GHS',
   },
+  // Cloudinary — service image hosting. The phone uploads directly using a
+  // signature minted here, so the secret never leaves the server and large
+  // files never transit the API. Empty => image endpoints report unconfigured
+  // rather than failing obscurely.
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+    apiKey: process.env.CLOUDINARY_API_KEY || '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+    folder: process.env.CLOUDINARY_FOLDER || 'laundromart/services',
+  },
   maps: {
     // Server-side Google Maps key (Geocoding API must be enabled; restrict by
     // IP, not Android app, since this is called from the backend). Empty =>

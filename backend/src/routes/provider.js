@@ -5,6 +5,7 @@ const { transitionOrder, verifyWeight, TransitionError } = require('../services/
 const sm = require('../services/orderStateMachine');
 const { ORDER_INCLUDE, shapeOrder } = require('../lib/orderShape');
 const { cacheDel, KEYS } = require('../lib/cache');
+const cloudinary = require('../services/cloudinary');
 
 const router = express.Router();
 const prisma = require('../lib/prisma');
@@ -297,6 +298,10 @@ function shapeService(s) {
     status: s.status,
     isAvailable: s.status === 'available',
     coverImage: s.coverImage,
+    images: Array.isArray(s.images)
+      ? s.images.map((i) => ({ id: i.id, url: i.imageUrl, thumbnailUrl: i.thumbnailUrl, displayOrder: i.displayOrder, isCover: i.isCover }))
+      : [],
+    imageCount: Array.isArray(s.images) ? s.images.length : 0,
     orderCount: 0, // overwritten by the list endpoint, which counts per name
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
@@ -370,6 +375,7 @@ router.get('/services', async (req, res) => {
     const rows = await prisma.laundryService.findMany({
       where: { providerId: req.user.id, deletedAt: null },
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      include: { images: { orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }] } },
     });
     // Orders reference a service by NAME (LaundryRequest.laundryType is a plain
     // string with no FK), so count this provider's orders grouped by that name.
@@ -445,6 +451,180 @@ router.delete('/services/:id', async (req, res) => {
   } catch (error) {
     console.error('Delete service error:', error);
     res.status(500).json({ error: 'Failed to delete service.' });
+  }
+});
+
+// ============================================================
+// SERVICE IMAGES — up to MAX_IMAGES per service, stored on Cloudinary.
+// ============================================================
+const MAX_IMAGES = 10;
+
+// Confirms the service belongs to the caller. Returns null when it doesn't, so
+// a provider can never touch another provider's images.
+async function findOwnedService(req, serviceId) {
+  const id = parseInt(serviceId, 10);
+  if (isNaN(id)) return null;
+  return prisma.laundryService.findFirst({
+    where: { id, providerId: req.user.id, deletedAt: null },
+  });
+}
+
+function shapeImage(img) {
+  return {
+    id: img.id,
+    url: img.imageUrl,
+    thumbnailUrl: img.thumbnailUrl,
+    displayOrder: img.displayOrder,
+    isCover: img.isCover,
+    createdAt: img.createdAt,
+  };
+}
+
+// Keep the parent service's coverImage in step with whichever image is flagged.
+async function syncCover(serviceId) {
+  const images = await prisma.laundryServiceImage.findMany({
+    where: { serviceId },
+    orderBy: [{ isCover: 'desc' }, { displayOrder: 'asc' }],
+  });
+  const cover = images.find((i) => i.isCover) || images[0] || null;
+  await prisma.laundryService.update({
+    where: { id: serviceId },
+    data: { coverImage: cover ? cover.imageUrl : null },
+  });
+  return cover;
+}
+
+// Short-lived credentials so the phone can upload straight to Cloudinary.
+router.post('/services/:id/images/signature', async (req, res) => {
+  try {
+    if (!cloudinary.isConfigured()) {
+      return res.status(503).json({ error: 'Image uploads are not configured yet.' });
+    }
+    const service = await findOwnedService(req, req.params.id);
+    if (!service) return res.status(404).json({ error: 'Service not found.' });
+
+    const count = await prisma.laundryServiceImage.count({ where: { serviceId: service.id } });
+    if (count >= MAX_IMAGES) {
+      return res.status(400).json({ error: `A service can have at most ${MAX_IMAGES} images.` });
+    }
+    res.json({ ...cloudinary.buildUploadSignature(), remaining: MAX_IMAGES - count });
+  } catch (error) {
+    console.error('Image signature error:', error);
+    res.status(500).json({ error: 'Failed to prepare upload.' });
+  }
+});
+
+// Record an image the client just uploaded to Cloudinary.
+router.post('/services/:id/images', async (req, res) => {
+  try {
+    const service = await findOwnedService(req, req.params.id);
+    if (!service) return res.status(404).json({ error: 'Service not found.' });
+
+    const publicId = String(req.body.publicId || '').trim();
+    if (!publicId) return res.status(400).json({ error: 'publicId is required.' });
+
+    const count = await prisma.laundryServiceImage.count({ where: { serviceId: service.id } });
+    if (count >= MAX_IMAGES) {
+      return res.status(400).json({ error: `A service can have at most ${MAX_IMAGES} images.` });
+    }
+
+    const created = await prisma.laundryServiceImage.create({
+      data: {
+        serviceId: service.id,
+        providerId: req.user.id,
+        publicId,
+        imageUrl: cloudinary.imageUrl(publicId),
+        thumbnailUrl: cloudinary.thumbnailUrl(publicId),
+        displayOrder: count,
+        isCover: count === 0, // first image becomes the cover
+      },
+    });
+    await syncCover(service.id);
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    res.status(201).json({ message: 'Image added.', image: shapeImage(created) });
+  } catch (error) {
+    console.error('Add image error:', error);
+    res.status(500).json({ error: 'Failed to save image.' });
+  }
+});
+
+router.get('/services/:id/images', async (req, res) => {
+  try {
+    const service = await findOwnedService(req, req.params.id);
+    if (!service) return res.status(404).json({ error: 'Service not found.' });
+    const images = await prisma.laundryServiceImage.findMany({
+      where: { serviceId: service.id },
+      orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }],
+    });
+    res.json({ count: images.length, max: MAX_IMAGES, images: images.map(shapeImage) });
+  } catch (error) {
+    console.error('List images error:', error);
+    res.status(500).json({ error: 'Failed to load images.' });
+  }
+});
+
+// Set the cover, or reorder the gallery.
+router.patch('/services/:id/images', async (req, res) => {
+  try {
+    const service = await findOwnedService(req, req.params.id);
+    if (!service) return res.status(404).json({ error: 'Service not found.' });
+
+    const { coverImageId, order } = req.body;
+
+    if (coverImageId != null) {
+      const target = await prisma.laundryServiceImage.findFirst({
+        where: { id: parseInt(coverImageId, 10), serviceId: service.id },
+      });
+      if (!target) return res.status(404).json({ error: 'Image not found.' });
+      await prisma.laundryServiceImage.updateMany({ where: { serviceId: service.id }, data: { isCover: false } });
+      await prisma.laundryServiceImage.update({ where: { id: target.id }, data: { isCover: true } });
+    }
+
+    if (Array.isArray(order) && order.length) {
+      // Only reorder ids that actually belong to this service.
+      const owned = await prisma.laundryServiceImage.findMany({
+        where: { serviceId: service.id }, select: { id: true },
+      });
+      const ownedIds = new Set(owned.map((o) => o.id));
+      await Promise.all(
+        order
+          .map((id, idx) => ({ id: parseInt(id, 10), idx }))
+          .filter(({ id }) => ownedIds.has(id))
+          .map(({ id, idx }) => prisma.laundryServiceImage.update({ where: { id }, data: { displayOrder: idx } })),
+      );
+    }
+
+    await syncCover(service.id);
+    const images = await prisma.laundryServiceImage.findMany({
+      where: { serviceId: service.id },
+      orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }],
+    });
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    res.json({ images: images.map(shapeImage) });
+  } catch (error) {
+    console.error('Update images error:', error);
+    res.status(500).json({ error: 'Failed to update images.' });
+  }
+});
+
+router.delete('/services/:id/images/:imageId', async (req, res) => {
+  try {
+    const service = await findOwnedService(req, req.params.id);
+    if (!service) return res.status(404).json({ error: 'Service not found.' });
+
+    const img = await prisma.laundryServiceImage.findFirst({
+      where: { id: parseInt(req.params.imageId, 10), serviceId: service.id },
+    });
+    if (!img) return res.status(404).json({ error: 'Image not found.' });
+
+    await cloudinary.destroy(img.publicId); // best-effort; row goes either way
+    await prisma.laundryServiceImage.delete({ where: { id: img.id } });
+    await syncCover(service.id);
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    res.json({ message: 'Image removed.' });
+  } catch (error) {
+    console.error('Delete image error:', error);
+    res.status(500).json({ error: 'Failed to delete image.' });
   }
 });
 

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import Constants from 'expo-constants';
 import * as SecureStore from '../utils/storage';
 import { Platform } from 'react-native';
 
@@ -11,7 +12,18 @@ const DEFAULT_BY_PLATFORM =
       ? 'http://10.0.2.2:3000/api'
       : 'http://localhost:3000/api';
 
-const envUrl = typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_URL : null;
+// Primary source: baked into the binary via app.config.js `extra.apiUrl` at
+// build time — reliable in release builds where EXPO_PUBLIC_ inlining can be
+// missed. Falls back to the raw env var (dev / `expo start`), then platform
+// dev defaults. This is what prevents release builds pointing at 10.0.2.2.
+const extraApiUrl =
+  Constants.expoConfig?.extra?.apiUrl ??
+  Constants.manifest?.extra?.apiUrl ??
+  Constants.manifest2?.extra?.expoClient?.extra?.apiUrl ??
+  null;
+const envUrl =
+  extraApiUrl ||
+  (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_URL : null);
 // On Android, localhost points to the emulator—never use it; use 10.0.2.2 or your PC's LAN IP.
 const effectiveEnvUrl =
   Platform.OS === 'android' && envUrl && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))

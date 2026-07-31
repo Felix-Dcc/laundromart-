@@ -15,7 +15,11 @@ const IS_PROD = APP_ENV === 'production';
 const BRAND_BLUE = '#1B7BF7'; // primary
 const BRAND_DEEP = '#0B4FD8'; // splash / adaptive backdrop
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
+// Live backend. Used as the production fallback so a build can never ship
+// pointing at a dev/emulator address even if EXPO_PUBLIC_API_URL is absent from
+// the build env (which is what left testers seeing "cannot reach server").
+const PROD_API_URL = 'https://humble-vision-production-964d.up.railway.app/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || (IS_PROD ? PROD_API_URL : undefined);
 const MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 // A production binary that ships pointing at a dev machine is unrecoverable
@@ -159,6 +163,9 @@ module.exports = {
     ],
     extra: {
       appEnv: APP_ENV,
+      // Baked in at build time and read via expo-constants — reliable regardless
+      // of whether EXPO_PUBLIC_API_URL gets inlined into the JS bundle.
+      apiUrl: API_URL,
       eas: { projectId: 'f1db1707-fb6c-4c19-9c1b-d691917deb1d' },
     },
   },

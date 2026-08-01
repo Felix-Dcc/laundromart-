@@ -190,6 +190,11 @@ model LaundryService {
   pricePerItem             Decimal?      @map("price_per_item") @db.Decimal(10, 2)
   estimatedCompletionHours Int?          @map("estimated_completion_hours")
   status                   ServiceStatus @default(available)
+  // Moderation is deliberately SEPARATE from `status`: status belongs to the
+  // provider, this belongs to the platform. A provider must not be able to
+  // un-hide something an admin took down by toggling their own availability.
+  hiddenByAdmin            Boolean       @default(false) @map("hidden_by_admin")
+  hiddenReason             String?       @map("hidden_reason") @db.Text
   coverImage               String?       @map("cover_image") @db.Text // set in the images phase
   // Soft delete: historical orders reference services by name, so removing a
   // service must only stop future bookings — never rewrite order history. Also
@@ -220,6 +225,8 @@ model LaundryServiceImage {
   thumbnailUrl String?  @map("thumbnail_url") @db.Text
   displayOrder Int      @default(0) @map("display_order")
   isCover      Boolean  @default(false) @map("is_cover")
+  // Admin takedown for a single image, without removing the whole service.
+  hiddenByAdmin Boolean @default(false) @map("hidden_by_admin")
   createdAt    DateTime @default(now()) @map("created_at")
 
   service LaundryService @relation("ServiceImages", fields: [serviceId], references: [id], onDelete: Cascade)

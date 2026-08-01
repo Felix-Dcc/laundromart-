@@ -228,9 +228,12 @@ router.get('/providers/:id/services', authenticate, async (req, res) => {
     if (isNaN(providerId)) return res.status(400).json({ error: 'Invalid provider id.' });
 
     const rows = await prisma.laundryService.findMany({
-      where: { providerId, status: 'available', deletedAt: null },
+      // hiddenByAdmin excludes moderated content from customers entirely.
+      where: { providerId, status: 'available', deletedAt: null, hiddenByAdmin: false },
       orderBy: [{ createdAt: 'asc' }],
-      include: { images: { orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }] } },
+      include: {
+        images: { where: { hiddenByAdmin: false }, orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }] },
+      },
     });
 
     const services = rows.map((s) => {
@@ -254,7 +257,9 @@ router.get('/providers/:id/services', authenticate, async (req, res) => {
         // per_item can't be priced without a quantity on the order, so it is
         // shown but not bookable yet.
         bookable: s.pricingType === 'per_kg' || s.pricingType === 'fixed',
-        coverImage: s.coverImage,
+        // Derive the cover from VISIBLE images — the stored coverImage URL may
+        // point at one an admin has since hidden.
+        coverImage: (s.images.find((i) => i.isCover) || s.images[0])?.imageUrl || null,
         images: s.images.map((i) => ({ id: i.id, url: i.imageUrl, thumbnailUrl: i.thumbnailUrl, isCover: i.isCover })),
       };
     });

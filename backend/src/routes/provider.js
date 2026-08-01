@@ -296,7 +296,11 @@ function shapeService(s) {
     priceUnit: unit,
     estimatedCompletionHours: s.estimatedCompletionHours,
     status: s.status,
-    isAvailable: s.status === 'available',
+    // Surfaced read-only: the provider can see a takedown and its reason, but
+    // cannot clear it by toggling their own availability.
+    hiddenByAdmin: s.hiddenByAdmin === true,
+    hiddenReason: s.hiddenReason || null,
+    isAvailable: s.status === 'available' && s.hiddenByAdmin !== true,
     coverImage: s.coverImage,
     images: Array.isArray(s.images)
       ? s.images.map((i) => ({ id: i.id, url: i.imageUrl, thumbnailUrl: i.thumbnailUrl, displayOrder: i.displayOrder, isCover: i.isCover }))

@@ -13,6 +13,7 @@ export const NAV = [
     { to: '/orders', icon: 'orders', label: 'Orders' },
     { to: '/users', icon: 'users', label: 'Users' },
     { to: '/providers', icon: 'provider', label: 'Providers' },
+    { to: '/services', icon: 'promo', label: 'Service Moderation' },
     { to: '/riders', icon: 'rider', label: 'Riders' },
     { to: '/admins', icon: 'admins', label: 'Admins', superOnly: true },
   ]},

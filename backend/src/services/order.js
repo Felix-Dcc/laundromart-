@@ -31,6 +31,7 @@ async function calculateLaundryCost(serviceType, weight, providerId = null) {
           name: serviceType,
           deletedAt: null,
           status: 'available',
+          hiddenByAdmin: false, // a moderated service must not be bookable
         },
       });
       if (svc) {

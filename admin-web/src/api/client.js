@@ -37,6 +37,10 @@ export const sa = {
   createProvider: (body) => api.post('/superadmin/providers', body),
   patchProvider: (id, body) => api.patch(`/superadmin/providers/${id}`, body),
   geocodeMissing: () => api.post('/superadmin/providers/geocode-missing'),
+  // Content moderation — hide/restore provider-published services and images.
+  services: (params) => api.get('/superadmin/services', { params }),
+  moderateService: (id, body) => api.patch(`/superadmin/services/${id}/moderate`, body),
+  moderateImage: (serviceId, imageId, body) => api.patch(`/superadmin/services/${serviceId}/images/${imageId}/moderate`, body),
   riders: () => api.get('/superadmin/riders'),
   createRider: (body) => api.post('/superadmin/riders', body),
   patchRider: (id, body) => api.patch(`/superadmin/riders/${id}`, body),

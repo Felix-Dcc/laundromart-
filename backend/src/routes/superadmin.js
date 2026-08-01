@@ -495,11 +495,18 @@ router.patch('/users/:id', async (req, res) => {
 });
 
 // Reset password → returns a temporary password (super admin only).
-router.post('/users/:id/reset-password', requireSuperAdmin, async (req, res) => {
+// Routine support work, so admins may do it — EXCEPT against another admin or a
+// super admin. Without that carve-out a plain admin could reset a super admin's
+// password and take over the platform.
+router.post('/users/:id/reset-password', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const u = await prisma.user.findUnique({ where: { id } });
     if (!u) return res.status(404).json({ error: 'User not found.' });
+    const targetIsStaff = u.userType === 'admin' || u.userType === 'superadmin';
+    if (targetIsStaff && req.user.userType !== 'superadmin') {
+      return res.status(403).json({ error: 'Only a super admin can reset an administrator password.' });
+    }
     const temp = 'Lms-' + Math.random().toString(36).slice(2, 8);
     await prisma.user.update({ where: { id }, data: { password: await bcrypt.hash(temp, 10) } });
     await prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
@@ -650,15 +657,139 @@ router.delete('/reviews/:id', async (req, res) => {
 });
 
 // ============================================================
+// SERVICE MODERATION — platform oversight of provider-published content.
+// Admins may hide services and images that breach policy. They may NOT edit a
+// provider's pricing, rename services, or create them: providers own their
+// business, the platform only polices it.
+// ============================================================
+router.get('/services', async (req, res) => {
+  try {
+    const { search, hidden } = req.query;
+    const where = { deletedAt: null };
+    if (hidden === 'true') where.hiddenByAdmin = true;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { category: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    const rows = await prisma.laundryService.findMany({
+      where,
+      orderBy: [{ hiddenByAdmin: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
+      include: {
+        images: { orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }] },
+        provider: { select: { id: true, businessName: true, firstName: true, lastName: true, email: true } },
+      },
+    });
+
+    res.json({
+      count: rows.length,
+      services: rows.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        category: s.category,
+        pricingType: s.pricingType,
+        price: s.pricingType === 'per_kg' ? num(s.pricePerKg)
+          : s.pricingType === 'fixed' ? num(s.fixedPrice) : num(s.pricePerItem),
+        status: s.status,
+        hiddenByAdmin: s.hiddenByAdmin,
+        hiddenReason: s.hiddenReason,
+        createdAt: s.createdAt,
+        provider: {
+          id: s.provider.id,
+          name: s.provider.businessName || `${s.provider.firstName} ${s.provider.lastName}`,
+          email: s.provider.email,
+        },
+        images: s.images.map((i) => ({
+          id: i.id, url: i.imageUrl, thumbnailUrl: i.thumbnailUrl,
+          isCover: i.isCover, hiddenByAdmin: i.hiddenByAdmin,
+        })),
+      })),
+    });
+  } catch (error) {
+    console.error('Moderation list error:', error);
+    res.status(500).json({ error: 'Failed to load services.' });
+  }
+});
+
+// Hide / restore a service. Only these two fields are writable — an admin
+// cannot alter what the provider charges or offers.
+router.patch('/services/:id/moderate', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const svc = await prisma.laundryService.findFirst({ where: { id, deletedAt: null } });
+    if (!svc) return res.status(404).json({ error: 'Service not found.' });
+    if (typeof req.body.hidden !== 'boolean') return res.status(400).json({ error: '`hidden` must be true or false.' });
+
+    const hidden = req.body.hidden;
+    const updated = await prisma.laundryService.update({
+      where: { id },
+      data: { hiddenByAdmin: hidden, hiddenReason: hidden ? (req.body.reason || 'Hidden by platform moderation.') : null },
+    });
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    await sendNotification(
+      svc.providerId,
+      hidden ? 'Service hidden by moderation' : 'Service restored',
+      hidden
+        ? `"${svc.name}" is no longer visible to customers. Reason: ${req.body.reason || 'policy review'}.`
+        : `"${svc.name}" is visible to customers again.`,
+      hidden ? 'warning' : 'success',
+      { category: 'system' },
+    ).catch(() => {});
+    await logAuditEvent({
+      userId: req.user.id, actionType: 'USER_UPDATED', entityType: 'service', entityId: id,
+      description: `${req.user.firstName} ${hidden ? 'hid' : 'restored'} service "${svc.name}"`,
+      metadata: { reason: req.body.reason || null }, ipAddress: req.ip, userAgent: req.get?.('user-agent'),
+    });
+    res.json({ message: hidden ? 'Service hidden.' : 'Service restored.', hiddenByAdmin: updated.hiddenByAdmin });
+  } catch (error) {
+    console.error('Moderate service error:', error);
+    res.status(500).json({ error: 'Failed to update service.' });
+  }
+});
+
+// Hide / restore a single image without taking down the whole service.
+router.patch('/services/:id/images/:imageId/moderate', async (req, res) => {
+  try {
+    const img = await prisma.laundryServiceImage.findFirst({
+      where: { id: parseInt(req.params.imageId, 10), serviceId: parseInt(req.params.id, 10) },
+    });
+    if (!img) return res.status(404).json({ error: 'Image not found.' });
+    if (typeof req.body.hidden !== 'boolean') return res.status(400).json({ error: '`hidden` must be true or false.' });
+
+    await prisma.laundryServiceImage.update({ where: { id: img.id }, data: { hiddenByAdmin: req.body.hidden } });
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    await logAuditEvent({
+      userId: req.user.id, actionType: 'USER_UPDATED', entityType: 'service_image', entityId: img.id,
+      description: `${req.user.firstName} ${req.body.hidden ? 'hid' : 'restored'} a service image`,
+      ipAddress: req.ip, userAgent: req.get?.('user-agent'),
+    });
+    res.json({ message: req.body.hidden ? 'Image hidden.' : 'Image restored.' });
+  } catch (error) {
+    console.error('Moderate image error:', error);
+    res.status(500).json({ error: 'Failed to update image.' });
+  }
+});
+
+// ============================================================
 // BROADCAST — notify an audience
 // ============================================================
-// Super admin only: messages every user on the platform at once.
-router.post('/broadcast', requireSuperAdmin, async (req, res) => {
+// Admins may announce to ONE segment (customers, providers or riders) — that is
+// routine operations. Reaching everyone at once, or messaging the admin team, is
+// platform-wide comms and stays with the super admin.
+const SEGMENT_AUDIENCES = ['user', 'provider', 'rider'];
+router.post('/broadcast', async (req, res) => {
   try {
     const { audience, title, message } = req.body;
     if (!title?.trim() || !message?.trim()) return res.status(400).json({ error: 'Title and message are required.' });
     const AUD = ['all', 'user', 'provider', 'rider', 'admin'];
     if (!AUD.includes(audience)) return res.status(400).json({ error: 'Invalid audience.' });
+    if (!SEGMENT_AUDIENCES.includes(audience) && req.user.userType !== 'superadmin') {
+      return res.status(403).json({ error: 'Only a super admin can broadcast platform-wide.' });
+    }
 
     const where = { status: 'active' };
     if (audience === 'admin') where.userType = { in: ['admin', 'superadmin'] };

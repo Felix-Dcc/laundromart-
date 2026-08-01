@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import Icon from './Icon';
 
 // Trap focus inside an overlay and close it on Escape. Shared by Modal/Drawer
@@ -80,16 +81,26 @@ export function Badge({ text, color = '#6b7280', dot = true }) {
   );
 }
 
-export function Kpi({ icon, label, value, tint = '#4f46e5', delta }) {
-  return (
-    <div className="kpi">
+// `to` makes a KPI actionable — e.g. pending approvals link straight to the
+// queue that clears them. Without it the tile renders exactly as before.
+export function Kpi({ icon, label, value, tint = '#4f46e5', delta, to, hint }) {
+  const inner = (
+    <>
       <div className="k-ico" style={{ background: hexA(tint, 0.14), color: tint }}><Icon name={icon} size={19} /></div>
       <div className="k-label">{label}</div>
       <div className="k-value mono">{value}</div>
       {delta != null && (
         <div className={`k-delta ${delta >= 0 ? 'up' : 'down'}`}>{delta >= 0 ? '▲' : '▼'} {Math.abs(delta)}%</div>
       )}
-    </div>
+      {hint && <div className="k-hint">{hint}</div>}
+    </>
+  );
+  if (!to) return <div className="kpi">{inner}</div>;
+  return (
+    <Link to={to} className="kpi kpi-link" aria-label={`${label}: ${value}. Open`}>
+      {inner}
+      <span className="k-go" aria-hidden="true"><Icon name="chevronR" size={14} /></span>
+    </Link>
   );
 }
 

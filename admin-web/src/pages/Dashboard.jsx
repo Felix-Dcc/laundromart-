@@ -11,6 +11,25 @@ const AXIS = { fontSize: 11, fill: 'var(--text-3)' };
 const tip = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12, color: 'var(--text)' };
 const RANGES = [{ label: '7D', days: 7 }, { label: '30D', days: 30 }, { label: '90D', days: 90 }, { label: '1Y', days: 365 }];
 const fmtMins = (m) => (m == null ? '—' : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);
+const fmtUptime = (s) => {
+  if (s == null) return '—';
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+};
+
+// One line of the health summary. `neutral` = informational, not a pass/fail.
+function HealthRow({ label, ok, value, neutral }) {
+  const color = neutral ? 'var(--text-3)' : ok ? 'var(--ok)' : 'var(--danger)';
+  return (
+    <div className="spread" style={{ fontSize: 13 }}>
+      <span className="muted">{label}</span>
+      <span className="row" style={{ gap: 6, fontWeight: 600 }}>
+        {!neutral && <span style={{ width: 7, height: 7, borderRadius: 4, background: color, display: 'inline-block' }} />}
+        <span style={{ color, textTransform: 'capitalize' }}>{value}</span>
+      </span>
+    </div>
+  );
+}
 
 function ChartCard({ title, sub, children }) {
   return (
@@ -27,13 +46,16 @@ export default function Dashboard() {
   const [ov, setOv] = useState(null);
   const [ts, setTs] = useState(null);
   const [activity, setActivity] = useState([]);
+  const [health, setHealth] = useState(null);
   const [range, setRange] = useState(30);
 
   async function load(days = range) {
-    const [o, t, a] = await Promise.all([
+    const [o, t, a, h] = await Promise.all([
       sa.overview(), sa.timeseries(days), adminApi.auditLogs({ limit: 8 }).catch(() => ({ data: { logs: [] } })),
+      // Health is supplementary — never let it block the dashboard.
+      sa.systemHealth().catch(() => ({ data: null })),
     ]);
-    setOv(o.data); setTs(t.data); setActivity(a.data.logs || []);
+    setOv(o.data); setTs(t.data); setActivity(a.data.logs || []); setHealth(h.data);
   }
   useEffect(() => { load(range); }, [range]);
   useEffect(() => {
@@ -83,7 +105,13 @@ export default function Dashboard() {
         <Kpi icon="rider" label="Total Riders" value={ov.riders.total} tint="#0ea5e9" />
         <Kpi icon="rider" label="Online Riders" value={ov.riders.online ?? ov.riders.active} tint="#10b981" />
         <Kpi icon="rider" label="Busy Riders" value={ov.riders.busy ?? '—'} tint="#f59e0b" />
-        <Kpi icon="shield" label="Pending Approvals" value={(ov.providers.pending || 0) + (ov.riders.pending || 0)} tint="#f59e0b" />
+        {/* Split, and each links to the queue that clears it. */}
+        <Kpi icon="provider" label="Pending Provider Approvals" value={ov.providers.pending || 0}
+          tint={ov.providers.pending ? '#f59e0b' : '#10b981'} to="/providers"
+          hint={ov.providers.pending ? 'Review now' : 'All clear'} />
+        <Kpi icon="rider" label="Pending Rider Approvals" value={ov.riders.pending || 0}
+          tint={ov.riders.pending ? '#f59e0b' : '#10b981'} to="/riders"
+          hint={ov.riders.pending ? 'Review now' : 'All clear'} />
         <Kpi icon="clock" label="Avg Delivery Time" value={fmtMins(ov.quality?.avgDeliveryMins)} tint="#0ea5e9" />
         <Kpi icon="reviews" label="Avg Rating" value={ov.quality?.avgRating != null ? `${ov.quality.avgRating}★` : '—'} tint="#f59e0b" />
         <Kpi icon="analytics" label="Platform Growth" value={`${ov.growth}%`} tint={ov.growth >= 0 ? '#10b981' : '#ef4444'} delta={ov.growth} />
@@ -154,6 +182,21 @@ export default function Dashboard() {
             <Link className="btn" to="/providers"><Icon name="provider" size={16} /> Review Providers {ov.providers.pending > 0 ? `(${ov.providers.pending})` : ''}</Link>
             <Link className="btn" to="/riders"><Icon name="rider" size={16} /> Review Riders {ov.riders.pending > 0 ? `(${ov.riders.pending})` : ''}</Link>
           </div>
+
+          {/* Platform health at a glance — details live on the Health page. */}
+          <div className="spread" style={{ marginTop: 18, marginBottom: 10 }}>
+            <div className="card-title">Platform Health</div>
+            <Link className="btn sm ghost" to="/health">Details</Link>
+          </div>
+          {health == null ? <Skeleton h={72} /> : (
+            <div className="grid" style={{ gap: 8 }}>
+              <HealthRow label="API" ok={health.api === 'up'} value={health.api} />
+              <HealthRow label="Database" ok={health.database === 'up'} value={health.database} />
+              <HealthRow label="Realtime" ok={health.socketio === 'up'} value={health.socketio} />
+              <HealthRow label="Payments" ok={health.paymentGateway === 'configured'} value={health.paymentGateway === 'configured' ? 'live' : 'sandbox'} />
+              <HealthRow label="Uptime" ok value={fmtUptime(health.uptimeSeconds)} neutral />
+            </div>
+          )}
         </div>
 
         <div className="card card-pad">

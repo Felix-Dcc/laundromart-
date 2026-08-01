@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Icon from './Icon';
 
@@ -42,6 +42,74 @@ export function exportCsv(filename, rows) {
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
+}
+
+const download = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+};
+
+const xmlEsc = (v) => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/\r?\n/g, ' ');
+
+/**
+ * Excel export via SpreadsheetML 2003 — a real Microsoft format, so Excel opens
+ * it without the "format and extension don't match" warning you get from the
+ * common trick of renaming an HTML table to .xls. Numbers stay numeric, so
+ * totals and sorting work. No dependency: admin-web builds with `npm ci`, and a
+ * spreadsheet library would add hundreds of KB for one button.
+ */
+export function exportExcel(filename, rows, sheetName = 'Report') {
+  if (!rows?.length) return;
+  const cols = Object.keys(rows[0]);
+  const cell = (v) => {
+    const isNum = typeof v === 'number' && Number.isFinite(v);
+    return `<Cell><Data ss:Type="${isNum ? 'Number' : 'String'}">${xmlEsc(isNum ? v : v)}</Data></Cell>`;
+  };
+  const header = `<Row>${cols.map((c) => `<Cell ss:StyleID="h"><Data ss:Type="String">${xmlEsc(c)}</Data></Cell>`).join('')}</Row>`;
+  const body = rows.map((r) => `<Row>${cols.map((c) => cell(r[c])).join('')}</Row>`).join('');
+  const xml = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Styles><Style ss:ID="h"><Font ss:Bold="1"/><Interior ss:Color="#EEF2FF" ss:Pattern="Solid"/></Style></Styles>
+<Worksheet ss:Name="${xmlEsc(sheetName).slice(0, 31)}"><Table>${header}${body}</Table></Worksheet></Workbook>`;
+  download(new Blob([xml], { type: 'application/vnd.ms-excel' }), filename);
+}
+
+/**
+ * PDF via the browser's own print pipeline ("Save as PDF"). This handles page
+ * breaks, repeating table headers and the user's paper size for free — better
+ * output than hand-rolling a PDF, and again no dependency.
+ */
+export function exportPdf(title, rows, subtitle = '') {
+  if (!rows?.length) return;
+  const cols = Object.keys(rows[0]);
+  const esc = (v) => String(v ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    *{box-sizing:border-box} body{font:12px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:24px}
+    h1{font-size:18px;margin:0 0 2px} .sub{color:#666;font-size:11.5px;margin-bottom:14px}
+    table{width:100%;border-collapse:collapse} thead{display:table-header-group}
+    th{text-align:left;background:#eef2ff;font-size:10.5px;text-transform:uppercase;letter-spacing:.3px}
+    th,td{border:1px solid #dcdfe6;padding:6px 8px;font-size:11px} tr{page-break-inside:avoid}
+    tbody tr:nth-child(even){background:#fafafa}
+    @page{margin:14mm}
+  </style></head><body>
+    <h1>${esc(title)}</h1>
+    <div class="sub">${esc(subtitle)}${subtitle ? ' · ' : ''}${rows.length} rows · generated ${new Date().toLocaleString()}</div>
+    <table><thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td>${esc(r[c])}</td>`).join('')}</tr>`).join('')}</tbody></table>
+  </body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) return false; // popup blocked — caller surfaces a message
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  // Let layout settle before invoking the print dialog.
+  setTimeout(() => w.print(), 250);
+  return true;
 }
 
 // Order status → label + color (mirrors the mobile/back-end vocabulary).
@@ -101,6 +169,57 @@ export function Kpi({ icon, label, value, tint = '#4f46e5', delta, to, hint }) {
       {inner}
       <span className="k-go" aria-hidden="true"><Icon name="chevronR" size={14} /></span>
     </Link>
+  );
+}
+
+// Preset + custom date-range picker. `value` is either { days } or { from, to }.
+// Emits the same shape the analytics API accepts, so callers just pass it through.
+export const RANGE_PRESETS = [
+  { label: 'Today', days: 1 },
+  { label: 'Week', days: 7 },
+  { label: 'Month', days: 30 },
+  { label: 'Year', days: 365 },
+  { label: 'All', days: null },
+];
+
+export function RangePicker({ value, onChange }) {
+  const [custom, setCustom] = useState(false);
+  const [from, setFrom] = useState(value?.from || '');
+  const [to, setTo] = useState(value?.to || '');
+  const today = new Date().toISOString().slice(0, 10);
+
+  function applyCustom() {
+    if (!from && !to) return;
+    onChange({ from: from || undefined, to: to || undefined });
+  }
+
+  return (
+    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+      <div className="seg" role="group" aria-label="Date range">
+        {RANGE_PRESETS.map((p) => {
+          const active = !custom && !value?.from && (value?.days ?? null) === p.days;
+          return (
+            <button
+              key={p.label}
+              className={`seg-btn ${active ? 'active' : ''}`}
+              aria-pressed={active}
+              onClick={() => { setCustom(false); onChange(p.days ? { days: p.days } : {}); }}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+        <button className={`seg-btn ${custom ? 'active' : ''}`} aria-pressed={custom} onClick={() => setCustom((c) => !c)}>Custom</button>
+      </div>
+      {custom && (
+        <div className="row" style={{ gap: 6 }}>
+          <input className="input input-sm" type="date" max={today} value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
+          <span className="muted">→</span>
+          <input className="input input-sm" type="date" max={today} value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+          <button className="btn sm primary" onClick={applyCustom} disabled={!from && !to}>Apply</button>
+        </div>
+      )}
+    </div>
   );
 }
 

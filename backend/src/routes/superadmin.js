@@ -939,18 +939,53 @@ router.put('/settings', requireSuperAdmin, async (req, res) => {
 // ============================================================
 // ANALYTICS — deeper platform insight
 // ============================================================
+// Accepts either ?days=N or an explicit ?from=YYYY-MM-DD&to=YYYY-MM-DD custom
+// range. Omitting both keeps the previous all-time behaviour, so existing
+// callers are unaffected.
+function resolveRange(query) {
+  const { from, to, days } = query;
+  if (from || to) {
+    const start = from ? new Date(`${from}T00:00:00.000Z`) : null;
+    const end = to ? new Date(`${to}T23:59:59.999Z`) : null;
+    if ((start && isNaN(start)) || (end && isNaN(end))) return { error: 'Invalid date. Use YYYY-MM-DD.' };
+    if (start && end && start > end) return { error: '`from` must not be after `to`.' };
+    const filter = {};
+    if (start) filter.gte = start;
+    if (end) filter.lte = end;
+    return { filter, label: `${from || 'start'} → ${to || 'now'}` };
+  }
+  const n = parseInt(days, 10);
+  if (!isNaN(n) && n > 0) {
+    const start = new Date();
+    start.setDate(start.getDate() - Math.min(n, 1825)); // cap at ~5 years
+    start.setHours(0, 0, 0, 0);
+    return { filter: { gte: start }, label: `last ${n} days` };
+  }
+  return { filter: null, label: 'all time' };
+}
+
 router.get('/analytics', async (req, res) => {
   try {
+    const range = resolveRange(req.query);
+    if (range.error) return res.status(400).json({ error: range.error });
+    // Orders and transactions are both dated by createdAt.
+    const oWhere = range.filter ? { createdAt: range.filter } : {};
+    const paidWhere = range.filter ? { status: 'paid', createdAt: range.filter } : { status: 'paid' };
+
     const [byStatus, services, provs, totalOrders, cancelled, revenue, repeat, payMethods, topRiders, acqRows] = await Promise.all([
-      prisma.laundryRequest.groupBy({ by: ['status'], _count: { _all: true } }),
-      prisma.laundryRequest.groupBy({ by: ['laundryType'], _count: { _all: true }, _sum: { totalAmount: true } }),
-      prisma.laundryRequest.groupBy({ by: ['providerId'], where: { providerId: { not: null } }, _count: { _all: true }, orderBy: { _count: { providerId: 'desc' } }, take: 8 }),
-      prisma.laundryRequest.count(),
-      prisma.laundryRequest.count({ where: { status: 'cancelled' } }),
-      prisma.transaction.aggregate({ where: { status: 'paid' }, _sum: { amount: true }, _count: true }),
-      prisma.$queryRaw`SELECT COUNT(*)::int AS c FROM (SELECT user_id FROM laundry_requests GROUP BY user_id HAVING COUNT(*) >= 2) t`,
-      // Payment-method split (paid transactions).
-      prisma.transaction.groupBy({ by: ['method'], where: { status: 'paid' }, _count: { _all: true }, _sum: { amount: true } }).catch(() => []),
+      prisma.laundryRequest.groupBy({ by: ['status'], where: oWhere, _count: { _all: true } }),
+      prisma.laundryRequest.groupBy({ by: ['laundryType'], where: oWhere, _count: { _all: true }, _sum: { totalAmount: true } }),
+      prisma.laundryRequest.groupBy({ by: ['providerId'], where: { ...oWhere, providerId: { not: null } }, _count: { _all: true }, orderBy: { _count: { providerId: 'desc' } }, take: 8 }),
+      prisma.laundryRequest.count({ where: oWhere }),
+      prisma.laundryRequest.count({ where: { ...oWhere, status: 'cancelled' } }),
+      prisma.transaction.aggregate({ where: paidWhere, _sum: { amount: true }, _count: true }),
+      // Repeat customers — groupBy instead of raw SQL so it honours the range.
+      prisma.laundryRequest.groupBy({
+        by: ['userId'], where: oWhere, _count: { _all: true },
+        having: { userId: { _count: { gte: 2 } } },
+      }).catch(() => []),
+      // Payment-method split (paid transactions, within range).
+      prisma.transaction.groupBy({ by: ['method'], where: paidWhere, _count: { _all: true }, _sum: { amount: true } }).catch(() => []),
       // Rider leaderboard.
       prisma.user.findMany({ where: { userType: 'rider' }, select: { firstName: true, lastName: true, totalPickups: true, totalEarnings: true }, orderBy: { totalPickups: 'desc' }, take: 8 }),
       // Customer acquisition — new customers per week, last 12 weeks.
@@ -971,8 +1006,10 @@ router.get('/analytics', async (req, res) => {
       paymentMethods: payMethods.map((m) => ({ method: (m.method || 'unknown').toUpperCase(), count: m._count._all, revenue: num(m._sum.amount) })),
       riderPerformance: topRiders.map((r) => ({ name: `${r.firstName} ${r.lastName}`, pickups: r.totalPickups || 0, earnings: num(r.totalEarnings) })),
       acquisition: acqRows.map((r) => ({ week: r.wk.slice(5), customers: Number(r.v) })),
+      // Echo the window so the UI can label the figures it is showing.
+      range: range.label,
       cancellationRate: totalOrders ? Math.round((cancelled / totalOrders) * 1000) / 10 : 0,
-      repeatCustomers: repeat[0]?.c || 0,
+      repeatCustomers: Array.isArray(repeat) ? repeat.length : 0,
       totalOrders,
       revenue: num(revenue._sum.amount),
       paidCount: revenue._count,

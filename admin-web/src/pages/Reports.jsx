@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { exportCsv, money } from '../components/ui';
+import { exportCsv, exportExcel, exportPdf, money } from '../components/ui';
 import { adminApi, sa } from '../api/client';
 import { useToast } from '../components/Toast';
 
@@ -23,34 +23,61 @@ const REPORTS = [
 export default function Reports() {
   const { toast } = useToast();
   const [busy, setBusy] = useState(null);
-  async function run(r) {
-    setBusy(r.key);
+
+  // One fetch, three output formats — the dataset is identical, only the
+  // encoding differs, so a report can never disagree between formats.
+  async function run(r, format) {
+    setBusy(`${r.key}:${format}`);
     try {
       const rows = await r.fetch();
       if (!rows?.length) { toast.info('No data to export for this report.'); return; }
-      exportCsv(`${r.key}-report.csv`, rows);
-      toast.success(`${r.title} exported (${rows.length} rows)`);
+
+      if (format === 'csv') {
+        exportCsv(`${r.key}-report.csv`, rows);
+      } else if (format === 'excel') {
+        exportExcel(`${r.key}-report.xls`, rows, r.title);
+      } else {
+        const opened = exportPdf(r.title, rows, 'LaundroMart');
+        if (!opened) { toast.error('Allow pop-ups for this site to export PDF.'); return; }
+      }
+      toast.success(`${r.title} · ${rows.length} rows (${format.toUpperCase()})`);
     } catch (e) { toast.error('Failed to generate report.'); }
     finally { setBusy(null); }
   }
 
   return (
     <>
-      <PageHead title="Reports" sub="Download platform data as CSV (opens in Excel/Sheets)" />
+      <PageHead title="Reports" sub="Export platform data as CSV, Excel or PDF" />
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))' }}>
         {REPORTS.map((r) => (
           <div key={r.key} className="card card-pad">
             <div className="k-ico" style={{ background: `${r.tint}22`, color: r.tint }}><Icon name={r.icon} size={20} /></div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{r.title}</div>
             <div className="muted" style={{ fontSize: 13, margin: '4px 0 14px' }}>{r.desc}</div>
-            <button className="btn" disabled={busy === r.key} onClick={() => run(r)}>
-              {busy === r.key ? 'Preparing…' : <><Icon name="download" size={15} /> Export CSV</>}
-            </button>
+            <div className="row" style={{ gap: 6 }}>
+              {[
+                { f: 'csv', label: 'CSV', icon: 'download' },
+                { f: 'excel', label: 'Excel', icon: 'reports' },
+                { f: 'pdf', label: 'PDF', icon: 'reports' },
+              ].map((o) => (
+                <button
+                  key={o.f}
+                  className="btn sm"
+                  style={{ flex: 1 }}
+                  disabled={busy === `${r.key}:${o.f}`}
+                  onClick={() => run(r, o.f)}
+                  title={`Export ${r.title} as ${o.label}`}
+                >
+                  {busy === `${r.key}:${o.f}` ? '…' : <><Icon name={o.icon} size={14} /> {o.label}</>}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
       </div>
       <div className="card card-pad" style={{ marginTop: 16, color: 'var(--text-2)', fontSize: 13 }}>
-        <Icon name="reports" size={14} /> Scheduled email reports and multi-page PDF exports build on these datasets — coming next.
+        <Icon name="reports" size={14} /> PDF opens a print view — choose “Save as PDF” in the print dialog.
+        Excel files open natively in Excel, LibreOffice and Google Sheets.
       </div>
     </>
   );

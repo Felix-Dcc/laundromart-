@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import PageHead from '../components/PageHead';
 import Icon from '../components/Icon';
-import { Kpi, money, SkeletonKpis, Skeleton, exportCsv } from '../components/ui';
+import { Kpi, money, SkeletonKpis, Skeleton, exportCsv, RangePicker } from '../components/ui';
 import { STATUS } from '../components/ui';
 import { sa } from '../api/client';
 
@@ -13,15 +13,34 @@ const PAY = { MOMO: '#10b981', CARD: '#4f46e5', UNKNOWN: '#94a3b8' };
 
 export default function Analytics() {
   const [a, setA] = useState(null);
-  useEffect(() => { sa.analytics().then((r) => setA(r.data)); }, []);
-  if (!a) return (<><PageHead title="Analytics" sub="Platform performance & trends" /><SkeletonKpis count={6} /><div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', marginTop: 18 }}>{[0, 1, 2, 3].map((i) => <Skeleton key={i} h={300} r={14} />)}</div></>);
+  // {} = all time · { days } = preset · { from, to } = custom range
+  const [range, setRange] = useState({ days: 30 });
+  useEffect(() => {
+    let cancelled = false;
+    setA(null);
+    sa.analytics(range).then((r) => { if (!cancelled) setA(r.data); }).catch(() => { if (!cancelled) setA(null); });
+    return () => { cancelled = true; };
+  }, [range.days, range.from, range.to]); // eslint-disable-line
+  // Keep the picker mounted while loading, or it would disappear on every
+  // range change and the control would feel like it jumps.
+  if (!a) return (
+    <>
+      <PageHead title="Analytics" sub="Platform performance & trends"
+        actions={<RangePicker value={range} onChange={setRange} />} />
+      <SkeletonKpis count={6} />
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', marginTop: 18 }}>
+        {[0, 1, 2, 3].map((i) => <Skeleton key={i} h={300} r={14} />)}
+      </div>
+    </>
+  );
 
   const statusData = a.ordersByStatus.map((s) => ({ name: (STATUS[s.status]?.[0] || s.status), value: s.count }));
 
   return (
     <>
-      <PageHead title="Analytics" sub="Platform performance & trends"
+      <PageHead title="Analytics" sub={`Platform performance & trends · ${a.range || 'all time'}`}
         actions={<>
+          <RangePicker value={range} onChange={setRange} />
           <button className="btn" onClick={() => exportCsv('services.csv', a.popularServices)}><Icon name="download" size={15} /> Services CSV</button>
           <button className="btn" onClick={() => window.print()}><Icon name="reports" size={15} /> Print / PDF</button>
         </>} />

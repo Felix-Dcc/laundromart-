@@ -58,7 +58,8 @@ export const sa = {
   deleteAdmin: (id) => api.delete(`/superadmin/admins/${id}`),
   settings: () => api.get('/superadmin/settings'),
   saveSettings: (body) => api.put('/superadmin/settings', body),
-  analytics: () => api.get('/superadmin/analytics'),
+  // params: { days } or { from, to } for a custom range; omit for all time.
+  analytics: (params) => api.get('/superadmin/analytics', { params }),
   // Phase 3
   promotions: () => api.get('/superadmin/promotions'),
   createPromo: (body) => api.post('/superadmin/promotions', body),

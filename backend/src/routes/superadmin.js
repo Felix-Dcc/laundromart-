@@ -652,7 +652,8 @@ router.delete('/reviews/:id', async (req, res) => {
 // ============================================================
 // BROADCAST — notify an audience
 // ============================================================
-router.post('/broadcast', async (req, res) => {
+// Super admin only: messages every user on the platform at once.
+router.post('/broadcast', requireSuperAdmin, async (req, res) => {
   try {
     const { audience, title, message } = req.body;
     if (!title?.trim() || !message?.trim()) return res.status(400).json({ error: 'Title and message are required.' });
@@ -777,7 +778,8 @@ router.get('/settings', async (req, res) => {
   }
 });
 
-router.put('/settings', async (req, res) => {
+// Super admin only: platform-wide configuration.
+router.put('/settings', requireSuperAdmin, async (req, res) => {
   try {
     const patch = req.body || {};
     const valid = SETTINGS.map((s) => s.key);
@@ -867,7 +869,8 @@ router.get('/promotions', async (req, res) => {
   }
 });
 
-router.post('/promotions', async (req, res) => {
+// Super admin only: promo codes discount real revenue.
+router.post('/promotions', requireSuperAdmin, async (req, res) => {
   try {
     const { code, description, type, value, minOrder, maxUses, startsAt, expiresAt } = req.body;
     if (!code?.trim()) return res.status(400).json({ error: 'Code is required.' });
@@ -897,7 +900,7 @@ router.post('/promotions', async (req, res) => {
   }
 });
 
-router.patch('/promotions/:id', async (req, res) => {
+router.patch('/promotions/:id', requireSuperAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const p = await prisma.promotion.findUnique({ where: { id } });
@@ -916,7 +919,7 @@ router.patch('/promotions/:id', async (req, res) => {
   }
 });
 
-router.delete('/promotions/:id', async (req, res) => {
+router.delete('/promotions/:id', requireSuperAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const p = await prisma.promotion.findUnique({ where: { id } });

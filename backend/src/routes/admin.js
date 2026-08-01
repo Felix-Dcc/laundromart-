@@ -1,6 +1,6 @@
 const express = require('express');
 const config = require('../config');
-const { authenticate, requireAdmin } = require('../middleware/auth');
+const { authenticate, requireAdmin, requireSuperAdmin } = require('../middleware/auth');
 const { sendNotification } = require('../services/notification');
 const { transitionOrder, cancelOrder, reassignRider, TransitionError } = require('../services/orderService');
 const sm = require('../services/orderStateMachine');
@@ -229,7 +229,8 @@ router.get('/settings/dispatch', async (req, res) => {
   }
 });
 
-router.put('/settings/dispatch', async (req, res) => {
+// Super admin only: dispatch config governs how work is assigned platform-wide.
+router.put('/settings/dispatch', requireSuperAdmin, async (req, res) => {
   try {
     const patch = {};
     const { maxActiveTasks, maxPickupRadiusKm, routeOptimization, distanceLimitKm } = req.body;

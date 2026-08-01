@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticate, requireAdmin } = require('../middleware/auth');
+const { authenticate, requireAdmin, requireSuperAdmin } = require('../middleware/auth');
 const { logPricingUpdate } = require('../services/audit');
 const { cacheWrap, cacheDel, KEYS } = require('../lib/cache');
 
@@ -40,7 +40,10 @@ router.get('/all', authenticate, requireAdmin, async (req, res) => {
 });
 
 // POST /api/pricing - Add new service (admin only)
-router.post('/', authenticate, requireAdmin, async (req, res) => {
+// Writes are super-admin only: the price list is a money lever, and for any
+// provider who hasn't defined their own services it IS their price. Reads stay
+// open to authenticated users — the customer booking screen depends on them.
+router.post('/', authenticate, requireSuperAdmin, async (req, res) => {
   try {
     const { serviceType, pricePerKg, description, status } = req.body;
 
@@ -76,7 +79,7 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/pricing/:id - Update service (admin only)
-router.put('/:id', authenticate, requireAdmin, async (req, res) => {
+router.put('/:id', authenticate, requireSuperAdmin, async (req, res) => {
   try {
     const pricingId = parseInt(req.params.id);
     const { serviceType, pricePerKg, description, status } = req.body;
@@ -113,7 +116,7 @@ router.put('/:id', authenticate, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/pricing/:id - Delete service (admin only)
-router.delete('/:id', authenticate, requireAdmin, async (req, res) => {
+router.delete('/:id', authenticate, requireSuperAdmin, async (req, res) => {
   try {
     const pricingId = parseInt(req.params.id);
 

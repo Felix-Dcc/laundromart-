@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import Icon from './Icon';
+import { useAuth } from '../context/AuthContext';
 
 // All command-center sections. `phase1` items are fully built; the rest render
 // a polished "coming soon" page so navigation is complete from day one.
@@ -13,7 +14,7 @@ export const NAV = [
     { to: '/users', icon: 'users', label: 'Users' },
     { to: '/providers', icon: 'provider', label: 'Providers' },
     { to: '/riders', icon: 'rider', label: 'Riders' },
-    { to: '/admins', icon: 'admins', label: 'Admins' },
+    { to: '/admins', icon: 'admins', label: 'Admins', superOnly: true },
   ]},
   { group: 'Finance & Insight', items: [
     { to: '/payments', icon: 'payments', label: 'Payments' },
@@ -22,12 +23,12 @@ export const NAV = [
     { to: '/reviews', icon: 'reviews', label: 'Reviews' },
   ]},
   { group: 'Engagement', items: [
-    { to: '/promotions', icon: 'promo', label: 'Promotions' },
-    { to: '/notifications', icon: 'bell', label: 'Notifications' },
+    { to: '/promotions', icon: 'promo', label: 'Promotions', superOnly: true },
+    { to: '/notifications', icon: 'bell', label: 'Notifications', superOnly: true },
     { to: '/support', icon: 'support', label: 'Support' },
   ]},
   { group: 'Platform', items: [
-    { to: '/settings', icon: 'settings', label: 'Platform Settings' },
+    { to: '/settings', icon: 'settings', label: 'Platform Settings', superOnly: true },
     { to: '/audit', icon: 'audit', label: 'Audit Logs' },
     { to: '/security', icon: 'shield', label: 'Security' },
     { to: '/health', icon: 'health', label: 'System Health' },
@@ -36,6 +37,13 @@ export const NAV = [
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, pending }) {
+  const { isSuper } = useAuth();
+  // Hide destinations a plain admin cannot use, so nobody clicks into a page
+  // whose every action returns 403. The backend remains the real gate.
+  const nav = NAV
+    .map((g) => ({ ...g, items: g.items.filter((it) => !it.superOnly || isSuper) }))
+    .filter((g) => g.items.length > 0);
+
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-brand">
@@ -43,7 +51,7 @@ export default function Sidebar({ collapsed, mobileOpen, pending }) {
         <span className="brand-text">Command Center</span>
       </div>
       <nav className="nav">
-        {NAV.map((g) => (
+        {nav.map((g) => (
           <div key={g.group}>
             <div className="nav-group-label">{g.group}</div>
             {g.items.map((it) => (

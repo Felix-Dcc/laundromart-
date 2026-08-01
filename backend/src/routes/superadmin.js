@@ -5,6 +5,9 @@ const { logAuditEvent } = require('../services/audit');
 const { sendNotification } = require('../services/notification');
 const { geocodeAddress } = require('../services/geocoding');
 const { ORDER_INCLUDE, shapeOrder } = require('../lib/orderShape');
+// Module-level so every handler can invalidate the provider cache. Some older
+// handlers below re-require this locally; that shadowing is harmless.
+const { cacheDel, KEYS } = require('../lib/cache');
 
 const router = express.Router();
 const prisma = require('../lib/prisma');

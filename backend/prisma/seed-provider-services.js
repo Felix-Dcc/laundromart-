@@ -13,6 +13,29 @@
  * Prices vary per provider on purpose — the whole point of the migration is that
  * laundromats compete on their own pricing rather than sharing one platform rate.
  */
+// Railway injects the INTERNAL database host (postgres.railway.internal), which
+// only resolves inside Railway's private network. `railway run` executes on your
+// own machine, so swap in the public proxy URL when one is available. Must run
+// BEFORE the Prisma client is required, since it reads DATABASE_URL at init.
+(function preferPublicDatabaseUrl() {
+  const current = process.env.DATABASE_URL || '';
+  if (!/\.railway\.internal/.test(current)) return;
+  const publicUrl = process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL_PUBLIC;
+  if (publicUrl) {
+    process.env.DATABASE_URL = publicUrl;
+    console.log('Using the public database URL (the internal host is not reachable from your machine).');
+  } else {
+    console.error('DATABASE_URL points at Railway\'s INTERNAL host, which only works inside Railway.');
+    console.error('No DATABASE_PUBLIC_URL was provided, so this cannot connect from your machine.\n');
+    console.error('Either:');
+    console.error('  1. Run it inside the container — Railway → backend service → one-off command:');
+    console.error('       node prisma/seed-provider-services.js --dry-run');
+    console.error('  2. Or enable public networking on the Postgres service and re-run, so');
+    console.error('     DATABASE_PUBLIC_URL becomes available.');
+    process.exit(1);
+  }
+})();
+
 const prisma = require('../src/lib/prisma');
 
 const DRY = process.argv.includes('--dry-run');

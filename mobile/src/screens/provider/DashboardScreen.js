@@ -56,6 +56,9 @@ export default function ProviderDashboardScreen({ navigation }) {
   }
 
   const stats = data?.stats || {};
+  // Defaults keep the card rendering on older builds whose API response
+  // predates the business metrics.
+  const business = data?.business || { ordersToday: 0, revenueToday: 0, revenueWeek: 0, revenueMonth: 0, avgRating: 0, reviewCount: 0 };
   const queues = data?.queues || {};
   const businessName = user?.businessName || `${user?.firstName}'s Laundry`;
 
@@ -90,6 +93,36 @@ export default function ProviderDashboardScreen({ navigation }) {
           </View>
         </View>
       </ImageBackground>
+
+      {/* Earnings — this laundromat's own revenue */}
+      <View style={styles.revenueCard}>
+        <View style={styles.revenueHead}>
+          <Ionicons name="cash-outline" size={16} color="#059669" />
+          <Text style={styles.revenueTitle}>Earnings</Text>
+          {business.avgRating > 0 && (
+            <Text style={styles.revenueRating}>★ {business.avgRating.toFixed(1)} ({business.reviewCount})</Text>
+          )}
+        </View>
+        <View style={styles.revenueRow}>
+          <View style={styles.revenueCell}>
+            <Text style={styles.revenueValue}>{formatCurrency(business.revenueToday)}</Text>
+            <Text style={styles.revenueLabel}>Today</Text>
+          </View>
+          <View style={styles.revenueDivider} />
+          <View style={styles.revenueCell}>
+            <Text style={styles.revenueValue}>{formatCurrency(business.revenueWeek)}</Text>
+            <Text style={styles.revenueLabel}>7 days</Text>
+          </View>
+          <View style={styles.revenueDivider} />
+          <View style={styles.revenueCell}>
+            <Text style={styles.revenueValue}>{formatCurrency(business.revenueMonth)}</Text>
+            <Text style={styles.revenueLabel}>This month</Text>
+          </View>
+        </View>
+        <Text style={styles.revenueFoot}>
+          {business.ordersToday} order{business.ordersToday === 1 ? '' : 's'} placed today
+        </Text>
+      </View>
 
       {/* Queue summary cards */}
       <View style={styles.queueRow}>
@@ -222,6 +255,17 @@ const styles = StyleSheet.create({
   heroStatDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.25)' },
 
   // Queue cards
+  revenueCard: { backgroundColor: '#fff', marginHorizontal: 16, marginTop: 14, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#eef2f7', elevation: 1, shadowColor: '#0f172a', shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
+  revenueHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+  revenueTitle: { fontSize: 14, fontWeight: '800', color: '#111827', flex: 1 },
+  revenueRating: { fontSize: 12, fontWeight: '700', color: '#f59e0b' },
+  revenueRow: { flexDirection: 'row', alignItems: 'center' },
+  revenueCell: { flex: 1, alignItems: 'center' },
+  revenueDivider: { width: 1, height: 32, backgroundColor: '#f1f5f9' },
+  revenueValue: { fontSize: 16, fontWeight: '800', color: '#059669' },
+  revenueLabel: { fontSize: 11.5, color: '#6b7280', marginTop: 2 },
+  revenueFoot: { fontSize: 12, color: '#6b7280', textAlign: 'center', marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+
   queueRow: { flexDirection: 'row', paddingHorizontal: 10, gap: 8, marginTop: 16 },
   queueCard: { flex: 1, backgroundColor: '#fff', borderRadius: 14, padding: 14, alignItems: 'center', borderTopWidth: 3, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
   queueIconWrap: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },

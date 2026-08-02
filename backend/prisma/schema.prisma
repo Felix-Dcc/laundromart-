@@ -108,6 +108,13 @@ model User {
   longitude         Float?
   businessName      String?    @map("business_name") @db.VarChar(150)
   businessHours     String?    @map("business_hours") @db.VarChar(100)
+  // Storefront presentation, owned by the provider. Images live on Cloudinary;
+  // publicId is kept because that is what the destroy endpoint needs.
+  businessDescription String?  @map("business_description") @db.Text
+  logoUrl             String?  @map("logo_url") @db.Text
+  logoPublicId        String?  @map("logo_public_id") @db.VarChar(255)
+  coverPhotoUrl       String?  @map("cover_photo_url") @db.Text
+  coverPhotoPublicId  String?  @map("cover_photo_public_id") @db.VarChar(255)
   placeId           String?    @map("place_id") @db.VarChar(255)      // Google Place ID (set once at geocode time; re-geocode guard)
   formattedAddress  String?    @map("formatted_address") @db.Text     // canonical address returned by Google Geocoding
   deliveryRadius    Float?     @default(10) @map("delivery_radius")    // km — provider delivers within this radius

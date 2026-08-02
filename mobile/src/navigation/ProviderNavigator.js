@@ -7,6 +7,7 @@ import ProviderDashboard from '../screens/provider/DashboardScreen';
 import OrderQueueScreen from '../screens/provider/OrderQueueScreen';
 import ProviderOrderDetailsScreen from '../screens/provider/OrderDetailsScreen';
 import ServicesScreen from '../screens/provider/ServicesScreen';
+import BusinessProfileScreen from '../screens/provider/BusinessProfileScreen';
 import AnalyticsScreen from '../screens/common/AnalyticsScreen';
 import NotificationsScreen from '../screens/common/NotificationsScreen';
 import NotificationSettingsScreen from '../screens/common/NotificationSettingsScreen';
@@ -49,6 +50,7 @@ function BusinessStack() {
   return (
     <Stack.Navigator screenOptions={headerGreen}>
       <Stack.Screen name="ServicesHome" component={ServicesScreen} options={{ title: 'My Services' }} />
+      <Stack.Screen name="BusinessProfile" component={BusinessProfileScreen} options={{ title: 'Business Profile' }} />
     </Stack.Navigator>
   );
 }

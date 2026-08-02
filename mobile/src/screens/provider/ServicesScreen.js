@@ -52,7 +52,7 @@ function categoryIcon(cat) {
   return 'water-outline';
 }
 
-export default function ServicesScreen() {
+export default function ServicesScreen({ navigation }) {
   const [services, setServices] = useState(null);
   const [categories, setCategories] = useState(FALLBACK_CATEGORIES);
   const [refreshing, setRefreshing] = useState(false);
@@ -122,10 +122,15 @@ export default function ServicesScreen() {
             {services == null ? 'Loading…' : `${services.length} total · ${availableCount} available`}
           </Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => setEditing({})} activeOpacity={0.9}>
-          <Ionicons name="add" size={18} color="#fff" />
-          <Text style={styles.addBtnText}>New</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity style={styles.profileBtn} onPress={() => navigation.navigate('BusinessProfile')} activeOpacity={0.85}>
+            <Ionicons name="storefront-outline" size={17} color={BRAND} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.addBtn} onPress={() => setEditing({})} activeOpacity={0.9}>
+            <Ionicons name="add" size={18} color="#fff" />
+            <Text style={styles.addBtnText}>New</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {services == null ? (
@@ -603,6 +608,7 @@ const styles = StyleSheet.create({
   headerSub: { fontSize: 12.5, color: '#6b7280', marginTop: 2 },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: BRAND, borderRadius: 20, paddingHorizontal: 14, height: 38 },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  profileBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#dbeafe' },
 
   emptyCta: { flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: 7, backgroundColor: BRAND, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 13, marginTop: 18 },
   emptyCtaText: { color: '#fff', fontWeight: '700', fontSize: 15 },

@@ -213,6 +213,10 @@ export const providerAPI = {
   // Pause/resume accepting new orders
   getAcceptingOrders: () => api.get('/provider/accepting-orders'),
   setAcceptingOrders: (acceptingOrders) => api.put('/provider/accepting-orders', { acceptingOrders }),
+  // ── Business profile (the provider's own storefront) ──
+  getBusinessProfile: () => api.get('/provider/profile'),
+  updateBusinessProfile: (body) => api.put('/provider/profile', body),
+  getProfileImageSignature: () => api.post('/provider/profile/image-signature'),
   // ── Services the provider owns and prices themselves ──
   getServiceCategories: () => api.get('/provider/service-categories'),
   getServices: () => api.get('/provider/services'),

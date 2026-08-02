@@ -6,6 +6,8 @@ const sm = require('../services/orderStateMachine');
 const { ORDER_INCLUDE, shapeOrder } = require('../lib/orderShape');
 const { cacheDel, KEYS } = require('../lib/cache');
 const cloudinary = require('../services/cloudinary');
+const { geocodeAddress } = require('../services/geocoding');
+const { emitLaundromatUpdate } = require('../services/realtime');
 
 const router = express.Router();
 const prisma = require('../lib/prisma');
@@ -64,11 +66,56 @@ router.get('/dashboard', async (req, res) => {
       prisma.laundryRequest.findMany({ where: { ...base, status: { in: ['ready_for_delivery', 'delivery_rider_assigned', 'rider_to_laundromat', 'collected_from_laundromat', 'out_for_delivery', 'rider_arrived_at_customer'] } }, include: ORDER_INCLUDE, orderBy: { updatedAt: 'desc' }, take: 5 }),
     ]);
 
+    // ── Business metrics: this laundromat only ──
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const startOfWeek = new Date(); startOfWeek.setDate(startOfWeek.getDate() - 6); startOfWeek.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(); startOfMonth.setDate(1); startOfMonth.setHours(0, 0, 0, 0);
+
+    // Revenue = paid transactions on this provider's orders. Mirrors
+    // scopeToProvider: providers see only their own, admins see everything.
+    const isProvider = req.user.userType === 'provider';
+    const paidOn = (gte) => ({
+      status: 'paid',
+      ...(isProvider ? { order: { providerId: req.user.id } } : {}),
+      ...(gte ? { createdAt: { gte } } : {}),
+    });
+    const [revToday, revWeek, revMonth, ordersToday, me, recent] = await Promise.all([
+      prisma.transaction.aggregate({ where: paidOn(startOfDay), _sum: { amount: true } }),
+      prisma.transaction.aggregate({ where: paidOn(startOfWeek), _sum: { amount: true } }),
+      prisma.transaction.aggregate({ where: paidOn(startOfMonth), _sum: { amount: true } }),
+      prisma.laundryRequest.count({ where: { ...base, createdAt: { gte: startOfDay } } }),
+      prisma.user.findUnique({ where: { id: req.user.id }, select: { avgRating: true, reviewCount: true } }),
+      // Recent activity — the provider's own latest order movements.
+      prisma.laundryRequest.findMany({
+        where: base,
+        select: { id: true, requestNumber: true, status: true, laundryType: true, totalAmount: true, finalAmount: true, updatedAt: true },
+        orderBy: { updatedAt: 'desc' },
+        take: 8,
+      }),
+    ]);
+    const money = (agg) => Number(agg?._sum?.amount || 0);
+
     const shape = (r) => shapeOrder(r, { role: req.user.userType });
     res.json({
       stats: { pendingCount, inProgressCount, completedCount, cancelledCount, totalRequests, awaitingVerifyCount,
                // aliases kept for backward compat with older mobile builds
                incomingCount: pendingCount },
+      business: {
+        ordersToday,
+        revenueToday: money(revToday),
+        revenueWeek: money(revWeek),
+        revenueMonth: money(revMonth),
+        avgRating: me?.avgRating || 0,
+        reviewCount: me?.reviewCount || 0,
+      },
+      recentActivity: recent.map((r) => ({
+        id: r.id,
+        requestNumber: r.requestNumber,
+        status: r.status,
+        service: r.laundryType,
+        amount: Number(r.finalAmount ?? r.totalAmount ?? 0),
+        at: r.updatedAt,
+      })),
       queues: { toVerify: toVerify.map(shape), inProgress: inProgress.map(shape), ready: ready.map(shape) },
     });
   } catch (error) {
@@ -260,6 +307,143 @@ router.put('/accepting-orders', async (req, res) => {
   } catch (error) {
     console.error('Set accepting-orders error:', error);
     res.status(500).json({ error: 'Failed to update setting.' });
+  }
+});
+
+// ============================================================
+// BUSINESS PROFILE — the provider's own storefront. Scoped to req.user.id, so a
+// provider can only ever read or change their own business.
+// ============================================================
+function shapeBusinessProfile(u) {
+  return {
+    id: u.id,
+    businessName: u.businessName || `${u.firstName}'s Laundry`,
+    businessDescription: u.businessDescription || '',
+    businessHours: u.businessHours || '',
+    address: u.address || '',
+    formattedAddress: u.formattedAddress || null,
+    latitude: u.latitude,
+    longitude: u.longitude,
+    phone: u.phone || '',
+    email: u.email,
+    deliveryRadius: u.deliveryRadius ?? null,
+    logoUrl: u.logoUrl || null,
+    coverPhotoUrl: u.coverPhotoUrl || null,
+    acceptingOrders: u.acceptingOrders !== false,
+    isVerified: u.isVerified === true,
+    avgRating: u.avgRating || 0,
+    reviewCount: u.reviewCount || 0,
+  };
+}
+
+const PROFILE_SELECT = {
+  id: true, firstName: true, lastName: true, email: true, phone: true, address: true,
+  businessName: true, businessDescription: true, businessHours: true,
+  formattedAddress: true, latitude: true, longitude: true, deliveryRadius: true,
+  logoUrl: true, coverPhotoUrl: true, acceptingOrders: true, isVerified: true,
+  avgRating: true, reviewCount: true,
+};
+
+router.get('/profile', async (req, res) => {
+  try {
+    const u = await prisma.user.findUnique({ where: { id: req.user.id }, select: PROFILE_SELECT });
+    if (!u) return res.status(404).json({ error: 'Profile not found.' });
+    res.json({ profile: shapeBusinessProfile(u) });
+  } catch (error) {
+    console.error('Provider profile error:', error);
+    res.status(500).json({ error: 'Failed to load your business profile.' });
+  }
+});
+
+// Signature for uploading a logo or cover photo straight to Cloudinary.
+router.post('/profile/image-signature', async (req, res) => {
+  if (!cloudinary.isConfigured()) return res.status(503).json({ error: 'Image uploads are not configured yet.' });
+  res.json(cloudinary.buildUploadSignature());
+});
+
+router.put('/profile', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const data = {};
+
+    if (b.businessName !== undefined) {
+      const v = String(b.businessName).trim();
+      if (!v) return res.status(400).json({ error: 'Business name cannot be empty.' });
+      if (v.length > 150) return res.status(400).json({ error: 'Business name is too long (max 150).' });
+      data.businessName = v;
+    }
+    if (b.businessDescription !== undefined) {
+      data.businessDescription = b.businessDescription ? String(b.businessDescription).trim() : null;
+    }
+    if (b.businessHours !== undefined) data.businessHours = String(b.businessHours).trim() || null;
+    if (b.phone !== undefined) {
+      const v = String(b.phone).trim();
+      if (v && v.length > 15) return res.status(400).json({ error: 'Phone number is too long.' });
+      if (v) data.phone = v;
+    }
+    if (b.deliveryRadius !== undefined && b.deliveryRadius !== '') {
+      const r = parseFloat(b.deliveryRadius);
+      if (isNaN(r) || r < 1 || r > 100) return res.status(400).json({ error: 'Delivery radius must be between 1 and 100 km.' });
+      data.deliveryRadius = r;
+    }
+    if (typeof b.acceptingOrders === 'boolean') data.acceptingOrders = b.acceptingOrders;
+
+    // Explicit coordinates win; otherwise a changed address is re-geocoded so the
+    // laundromat stays correctly placed on the customer map.
+    if (b.address !== undefined && String(b.address).trim()) {
+      const addr = String(b.address).trim();
+      const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { address: true } });
+      data.address = addr;
+      if (current?.address !== addr) {
+        const geo = await geocodeAddress(addr);
+        if (geo) {
+          data.latitude = geo.latitude;
+          data.longitude = geo.longitude;
+          data.placeId = geo.placeId;
+          data.formattedAddress = geo.formattedAddress;
+        }
+      }
+    }
+    if (b.latitude != null && b.longitude != null && b.latitude !== '' && b.longitude !== '') {
+      const la = parseFloat(b.latitude), lo = parseFloat(b.longitude);
+      if (!isNaN(la) && !isNaN(lo)) { data.latitude = la; data.longitude = lo; }
+    }
+
+    // Logo / cover: the client uploads to Cloudinary, then sends the publicId.
+    // Replacing an image destroys the previous asset so storage doesn't leak.
+    for (const [key, urlField, idField] of [
+      ['logoPublicId', 'logoUrl', 'logoPublicId'],
+      ['coverPublicId', 'coverPhotoUrl', 'coverPhotoPublicId'],
+    ]) {
+      if (b[key] === undefined) continue;
+      const existing = await prisma.user.findUnique({ where: { id: req.user.id }, select: { [idField]: true } });
+      if (existing?.[idField]) await cloudinary.destroy(existing[idField]).catch(() => {});
+      if (b[key] === null || b[key] === '') {
+        data[urlField] = null; data[idField] = null;
+      } else {
+        data[idField] = String(b[key]);
+        data[urlField] = cloudinary.imageUrl(String(b[key]));
+      }
+    }
+
+    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'No valid fields to update.' });
+
+    const updated = await prisma.user.update({ where: { id: req.user.id }, data, select: PROFILE_SELECT });
+    await cacheDel(KEYS.activeProviders).catch(() => {});
+    emitLaundromatUpdate('updated', {
+      id: updated.id,
+      businessName: updated.businessName,
+      address: updated.formattedAddress || updated.address,
+      latitude: updated.latitude,
+      longitude: updated.longitude,
+      businessHours: updated.businessHours,
+      avgRating: updated.avgRating,
+      reviewCount: updated.reviewCount,
+    });
+    res.json({ message: 'Business profile updated.', profile: shapeBusinessProfile(updated) });
+  } catch (error) {
+    console.error('Update provider profile error:', error);
+    res.status(500).json({ error: 'Failed to update your business profile.' });
   }
 });
 

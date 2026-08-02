@@ -61,7 +61,31 @@ function priceFor(base, providerId) {
   return Math.max(1, Math.round((base + jitter) * 100) / 100);
 }
 
+// Report — and sanity-check — which database we are about to touch. `railway
+// run` executes locally, so if the linked service does not expose DATABASE_URL,
+// dotenv silently falls back to the local .env and you seed the wrong database.
+// That is easy to miss because a dev database also has providers in it.
+function describeTarget() {
+  const raw = process.env.DATABASE_URL || '';
+  let host = 'unknown', db = 'unknown';
+  try { const u = new URL(raw); host = u.hostname; db = u.pathname.slice(1); } catch { /* ignore */ }
+  const isLocal = /^(localhost|127\.0\.0\.1|::1)$/.test(host);
+  console.log(`Target database: ${db} @ ${host}${isLocal ? '  ← LOCAL' : '  (remote)'}\n`);
+  if (isLocal && !process.argv.includes('--allow-local')) {
+    console.error('Refusing to run against a LOCAL database.');
+    console.error('Your customers are on the Railway database, so seeding localhost would appear to work and change nothing.');
+    console.error('');
+    console.error('  Run it against production:  railway run node prisma/seed-provider-services.js --dry-run');
+    console.error('  (make sure `railway link` selected the BACKEND service, which is what exposes DATABASE_URL)');
+    console.error('');
+    console.error('  If you really do want to seed your local dev database, add --allow-local');
+    process.exit(1);
+  }
+}
+
 async function main() {
+  describeTarget();
+
   const providers = await prisma.user.findMany({
     where: { userType: 'provider', status: 'active' },
     select: { id: true, businessName: true, firstName: true, lastName: true },

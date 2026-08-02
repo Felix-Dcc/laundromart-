@@ -8,7 +8,6 @@ import AdminUsersScreen from '../screens/admin/UsersScreen';
 import AdminUserDetailsScreen from '../screens/admin/UserDetailsScreen';
 import AdminOrdersScreen from '../screens/admin/OrdersScreen';
 import AdminOrderDetailsScreen from '../screens/admin/OrderDetailsScreen';
-import AdminPricingScreen from '../screens/admin/PricingScreen';
 import AdminTransactionsScreen from '../screens/admin/TransactionsScreen';
 import AuditLogScreen from '../screens/admin/AuditLogScreen';
 import AnalyticsScreen from '../screens/common/AnalyticsScreen';
@@ -60,7 +59,9 @@ function AnalyticsStack() {
 function MoreStack() {
   return (
     <Stack.Navigator screenOptions={headerRed}>
-      <Stack.Screen name="Pricing" component={AdminPricingScreen} options={{ title: 'Manage Pricing' }} />
+      {/* Global pricing is retired — providers own their services and prices.
+          The screen is kept out of navigation rather than deleted, so the
+          legacy rows remain inspectable if ever needed. */}
       <Stack.Screen name="Transactions" component={AdminTransactionsScreen} options={{ title: 'Transactions' }} />
       <Stack.Screen name="AuditLogs" component={AuditLogScreen} options={{ title: 'Audit Logs' }} />
       <Stack.Screen name="MyProfile" component={ProfileScreen} options={{ title: 'My Profile' }} />

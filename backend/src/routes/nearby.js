@@ -36,15 +36,20 @@ function deliversTo(distanceKm, radius) {
 }
 
 // Attach open/accepting/available flags so clients can gate the Select button.
-function withAvailability(p, businessHours) {
+// A provider with no published services cannot be booked, however open they are.
+function withAvailability(p, businessHours, serviceCount = 0) {
   const open = isOpenNow(businessHours);        // true | false | null(unparseable)
   const isOpen = open !== false;
   const acceptingOrders = p.acceptingOrders !== false;
+  const hasServices = serviceCount > 0;
   return {
+    serviceCount,
+    hasServices,
     acceptingOrders,
     isOpen,
     open,
-    available: acceptingOrders && isOpen,        // provider is already active (query-filtered)
+    // Bookable = open, accepting, AND has at least one published service.
+    available: acceptingOrders && isOpen && hasServices,
   };
 }
 
@@ -58,14 +63,27 @@ function loadActiveProviders() {
   }));
 }
 
-function loadActiveServices() {
-  return cacheWrap(KEYS.activePricing, 300, async () => {
-    const rows = await prisma.laundryPricing.findMany({
-      where: { status: 'active' },
-      orderBy: { serviceType: 'asc' },
-    });
-    return rows;
+// Services belong to providers, so each laundromat reports its OWN catalogue.
+// One grouped query for the whole result set, then a lookup per provider —
+// there is no platform-wide service list any more.
+async function loadServiceNamesByProvider(providerIds) {
+  if (!providerIds.length) return new Map();
+  const rows = await prisma.laundryService.findMany({
+    where: {
+      providerId: { in: providerIds },
+      status: 'available',
+      deletedAt: null,
+      hiddenByAdmin: false,
+    },
+    select: { providerId: true, name: true },
+    orderBy: { name: 'asc' },
   });
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.providerId)) map.set(r.providerId, []);
+    map.get(r.providerId).push(r.name);
+  }
+  return map;
 }
 
 // ============================================================
@@ -103,14 +121,11 @@ router.get('/all', authenticate, async (req, res) => {
     const userLng = parseFloat(lng);
     const hasUserLocation = !isNaN(userLat) && !isNaN(userLng);
 
-    const [providers, activePricing] = await Promise.all([
-      loadActiveProviders(),
-      loadActiveServices(),
-    ]);
-
-    const services = activePricing.map((s) => s.serviceType);
+    const providers = await loadActiveProviders();
+    const serviceMap = await loadServiceNamesByProvider(providers.map((p) => p.id));
 
     const result = providers.map((p) => {
+      const services = serviceMap.get(p.id) || [];
       const distanceKm = hasUserLocation
         ? Math.round(haversineKm(userLat, userLng, p.latitude, p.longitude) * 100) / 100
         : null;
@@ -134,7 +149,7 @@ router.get('/all', authenticate, async (req, res) => {
         distanceKm,
         estimatedPickupMin: distanceKm != null ? estimatePickupMinutes(distanceKm) : null,
         services,
-        ...withAvailability(p, businessHours),
+        ...withAvailability(p, businessHours, services.length),
       };
     });
 
@@ -173,12 +188,14 @@ router.get('/', authenticate, async (req, res) => {
 
     // Fetch all active providers that have coordinates (cached).
     const providers = await loadActiveProviders();
+    const serviceMap = await loadServiceNamesByProvider(providers.map((p) => p.id));
 
     // Calculate distance for each, filter by radius, sort
     const nearby = providers
       .map((p) => {
         const distanceKm = haversineKm(userLat, userLng, p.latitude, p.longitude);
         const businessHours = p.businessHours || '9:00 AM – 6:00 PM';
+        const services = serviceMap.get(p.id) || [];
         return {
           id: p.id,
           businessName: p.businessName || `${p.firstName}'s Laundry`,
@@ -197,7 +214,8 @@ router.get('/', authenticate, async (req, res) => {
           favoriteCount: p._count ? p._count.favoritedBy : 0,
           distanceKm: Math.round(distanceKm * 100) / 100,
           estimatedPickupMin: estimatePickupMinutes(distanceKm),
-          ...withAvailability(p, businessHours),
+          services,
+          ...withAvailability(p, businessHours, services.length),
         };
       })
       .filter((p) => p.distanceKm <= maxRadius)

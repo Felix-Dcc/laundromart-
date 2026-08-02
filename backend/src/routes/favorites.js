@@ -77,20 +77,31 @@ router.get('/', authenticate, async (req, res) => {
     const userLng = parseFloat(lng);
     const hasLoc = !isNaN(userLat) && !isNaN(userLng);
 
-    const [favorites, activePricing] = await Promise.all([
-      prisma.favorite.findMany({
-        where: { userId: req.user.id },
-        orderBy: { createdAt: 'desc' },
-        include: { provider: { select: PROVIDER_SELECT } },
-      }),
-      prisma.laundryPricing.findMany({
-        where: { status: 'active' },
-        select: { serviceType: true },
-        orderBy: { serviceType: 'asc' },
-      }),
-    ]);
+    const favorites = await prisma.favorite.findMany({
+      where: { userId: req.user.id },
+      orderBy: { createdAt: 'desc' },
+      include: { provider: { select: PROVIDER_SELECT } },
+    });
 
-    const services = activePricing.map((s) => s.serviceType);
+    // Each laundromat's OWN catalogue — there is no platform-wide service list.
+    const providerIds = favorites.map((f) => f.provider?.id).filter(Boolean);
+    const serviceRows = providerIds.length
+      ? await prisma.laundryService.findMany({
+        where: {
+          providerId: { in: providerIds },
+          status: 'available',
+          deletedAt: null,
+          hiddenByAdmin: false,
+        },
+        select: { providerId: true, name: true },
+        orderBy: { name: 'asc' },
+      })
+      : [];
+    const serviceMap = new Map();
+    for (const r of serviceRows) {
+      if (!serviceMap.has(r.providerId)) serviceMap.set(r.providerId, []);
+      serviceMap.get(r.providerId).push(r.name);
+    }
 
     const result = favorites
       .filter((f) => f.provider && f.provider.status === 'active')
@@ -100,7 +111,7 @@ router.get('/', authenticate, async (req, res) => {
           hasLoc && p.latitude != null && p.longitude != null
             ? Math.round(haversineKm(userLat, userLng, p.latitude, p.longitude) * 100) / 100
             : null;
-        return { ...shapeProvider(p, services, distanceKm), favoritedAt: f.createdAt };
+        return { ...shapeProvider(p, serviceMap.get(p.id) || [], distanceKm), favoritedAt: f.createdAt };
       });
 
     // Distance first when we know the user's location; otherwise newest-favorited.

@@ -7,7 +7,7 @@ import {
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { pricingAPI, ordersAPI, nearbyAPI } from '../../api/client';
+import { ordersAPI, nearbyAPI } from '../../api/client';
 import { formatCurrency, isToday as isTodayISO, nowRoundedUpTo5HHMM, formatDate, formatTime } from '../../utils/helpers';
 import { useAuth } from '../../context/AuthContext';
 import DatePicker from '../../components/DatePicker';
@@ -94,19 +94,13 @@ export default function NewRequestScreen({ navigation, route }) {
 
   async function loadServices(providerId) {
     try {
+      // Services are owned by the laundromat. There is no platform-wide list and
+      // no fallback: if this provider has published nothing, the customer sees an
+      // empty state rather than services the provider does not actually offer.
       let list = [];
-      // Prefer the chosen laundromat's OWN services (their prices, their photos).
-      // Providers who haven't set any up fall back to the platform-wide list, so
-      // the booking flow is unchanged for them.
       if (providerId) {
-        try {
-          const own = await nearbyAPI.getProviderServices(providerId);
-          list = (own.data.services || []).filter((s) => s.bookable !== false);
-        } catch { /* fall through to the global list */ }
-      }
-      if (!list.length) {
-        const res = await pricingAPI.getActive();
-        list = res.data.pricing || [];
+        const own = await nearbyAPI.getProviderServices(providerId);
+        list = (own.data.services || []).filter((s) => s.bookable !== false);
       }
       setServices(list);
       // Preselect the first service for a faster start.
@@ -296,16 +290,30 @@ export default function NewRequestScreen({ navigation, route }) {
 
         {/* ── Services ── */}
         <SectionTitle icon="pricetags-outline" text="Laundry Service" />
-        <View style={styles.serviceGrid}>
-          {services.map((s) => (
-            <ServiceCard
-              key={s.id}
-              service={s}
-              active={form.laundryType === s.serviceType}
-              onPress={() => update('laundryType', s.serviceType)}
-            />
-          ))}
-        </View>
+        {services.length === 0 ? (
+          <View style={styles.noServices}>
+            <Ionicons name="pricetags-outline" size={30} color="#9ca3af" />
+            <Text style={styles.noServicesTitle}>No services available yet</Text>
+            <Text style={styles.noServicesText}>
+              This laundromat has not added any laundry services. Please choose a different laundromat.
+            </Text>
+            <TouchableOpacity style={styles.noServicesBtn} onPress={() => navigation.navigate('ChooseLaundromat')} activeOpacity={0.9}>
+              <Ionicons name="storefront-outline" size={16} color="#fff" />
+              <Text style={styles.noServicesBtnText}>Choose another laundromat</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.serviceGrid}>
+            {services.map((s) => (
+              <ServiceCard
+                key={s.id}
+                service={s}
+                active={form.laundryType === s.serviceType}
+                onPress={() => update('laundryType', s.serviceType)}
+              />
+            ))}
+          </View>
+        )}
 
         {/* Weight */}
         <View style={styles.weightRow}>
@@ -588,6 +596,13 @@ const styles = StyleSheet.create({
   },
   serviceIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   servicePhoto: { width: '100%', height: 72, borderRadius: 12, marginBottom: 10, backgroundColor: '#f3f4f6' },
+  // Shown when a laundromat has published nothing — never fall back to a
+  // platform list, which would advertise services they do not offer.
+  noServices: { alignItems: 'center', marginHorizontal: 16, backgroundColor: '#fff', borderRadius: 16, paddingVertical: 26, paddingHorizontal: 20, borderWidth: 1, borderColor: '#eef2f7', gap: 8 },
+  noServicesTitle: { fontSize: 15.5, fontWeight: '800', color: '#1f2937', marginTop: 4 },
+  noServicesText: { fontSize: 13, color: '#6b7280', textAlign: 'center', lineHeight: 19 },
+  noServicesBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: '#1B7BF7', borderRadius: 12, paddingVertical: 11, paddingHorizontal: 16, marginTop: 8 },
+  noServicesBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   serviceIconActive: { backgroundColor: '#1B7BF7' },
   // minHeight reserves two lines so every card is the same height regardless of
   // whether the service name wraps.

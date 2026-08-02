@@ -122,7 +122,8 @@ export default function AdminDashboardScreen({ navigation }) {
         <ActionButton icon="time-outline" color="#f59e0b" bgColors={['#fffbeb', '#fef3c7']} label="Pending Orders" onPress={() => navigation.navigate('Orders', { screen: 'AllOrders', params: { status: 'pending' } })} />
         <ActionButton icon="list-outline" color="#3b82f6" bgColors={['#eff6ff', '#dbeafe']} label="All Orders" onPress={() => navigation.navigate('Orders', { screen: 'AllOrders' })} />
         <ActionButton icon="people-outline" color="#8b5cf6" bgColors={['#f5f3ff', '#ede9fe']} label="Users" onPress={() => navigation.navigate('Users', { screen: 'AllUsers' })} />
-        <ActionButton icon="pricetag-outline" color="#10b981" bgColors={['#ecfdf5', '#d1fae5']} label="Pricing" onPress={() => navigation.navigate('More', { screen: 'Pricing' })} />
+        {/* Pricing removed: providers set their own prices, so there is no
+            platform-wide list for an admin to manage. */}
         <ActionButton icon="card-outline" color="#1B7BF7" bgColors={['#eff6ff', '#dbeafe']} label="Transactions" onPress={() => navigation.navigate('More', { screen: 'Transactions' })} />
         <ActionButton icon="document-text-outline" color="#6f42c1" bgColors={['#f5f3ff', '#ede9fe']} label="Audit Logs" onPress={() => navigation.navigate('More', { screen: 'AuditLogs' })} />
       </View>

@@ -75,6 +75,22 @@ async function assertProviderAvailable(providerId) {
   if (!provider || provider.userType !== 'provider') throw err('Selected laundromat could not be found.');
   const reason = unavailableReason(provider);
   if (reason) throw err(reason);
+
+  // A laundromat cannot take orders until it has published at least one
+  // service. Services are provider-owned, so there is no platform-wide list to
+  // fall back on — without this the order would have nothing to price against.
+  const publishedServices = await prisma.laundryService.count({
+    where: {
+      providerId: provider.id,
+      status: 'available',
+      deletedAt: null,
+      hiddenByAdmin: false,
+    },
+  });
+  if (publishedServices === 0) {
+    throw err('This laundromat has not published any services yet. Please choose another.');
+  }
+
   return provider;
 }
 

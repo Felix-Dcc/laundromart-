@@ -11,6 +11,7 @@
     "prisma:seed": "node prisma/seed.js",
     "prisma:studio": "npx prisma studio",
     "seed": "node prisma/seed.js",
+    "seed:provider-services": "node prisma/seed-provider-services.js",
     "setup": "npm install && npx prisma generate && npx prisma migrate dev --name init && node prisma/seed.js"
   },
   "dependencies": {

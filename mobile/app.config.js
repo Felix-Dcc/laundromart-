@@ -119,6 +119,10 @@ module.exports = {
           'We need your location to find nearby laundromats and provide navigation.',
         NSLocationAlwaysAndWhenInUseUsageDescription:
           'We need your location to track rider deliveries in real time.',
+        // The app uses only standard HTTPS/TLS, which is exempt under Apple's
+        // encryption export rules. Declaring it here answers the question once,
+        // instead of manually in App Store Connect on every submission.
+        ITSAppUsesNonExemptEncryption: false,
       },
     },
     android: {
